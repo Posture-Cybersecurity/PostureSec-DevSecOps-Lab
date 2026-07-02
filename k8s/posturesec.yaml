@@ -198,7 +198,7 @@ spec:
               echo "DB is ready!"
       containers:
         - name: backend
-          image: ghcr.io/posture-cybersecurity/posturesec/posturesec-backend:9a47a04
+          image: ghcr.io/posture-cybersecurity/posturesec/posturesec-backend:7dc87bd
           imagePullPolicy: Always
           ports:
             - containerPort: 5000
@@ -308,7 +308,7 @@ spec:
           effect: "NoSchedule"
       containers:
         - name: frontend
-          image: ghcr.io/posture-cybersecurity/posturesec/posturesec-frontend:9a47a04
+          image: ghcr.io/posture-cybersecurity/posturesec/posturesec-frontend:7dc87bd
           imagePullPolicy: Always
           ports:
             - containerPort: 8080
