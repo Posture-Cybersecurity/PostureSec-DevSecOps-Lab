@@ -1,5 +1,5 @@
 # ==============================================================
-# PostureSec  Posture Cybersecurity Platform - Kubernetes Manifest
+# PostureSec - Posture Cybersecurity Platform - Kubernetes Manifest
 # Includes: Secrets, PVC (EBS), DB, Backend, Frontend
 #
 # Apply order:
@@ -11,9 +11,9 @@
 # ---- Database Secret ----
 # In production, use External Secrets Operator or Sealed Secrets.
 # This is base64 encoded for demo purposes.
-# echo -n 'posturesec_user' | base64 ? cG9zdHVyZXNlY191c2Vy
-# echo -n 'posturesec_pass_2026' | base64 ? cG9zdHVyZXNlY19wYXNzXzIwMjY=
-# echo -n 'posturesec_db' | base64 ? cG9zdHVyZXNlY19kYg==
+# echo -n 'posturesec_user' | base64 -> cG9zdHVyZXNlY191c2Vy
+# echo -n 'posturesec_pass_2026' | base64 -> cG9zdHVyZXNlY19wYXNzXzIwMjY=
+# echo -n 'posturesec_db' | base64 -> cG9zdHVyZXNlY19kYg==
 
 apiVersion: v1
 kind: Secret
@@ -134,7 +134,7 @@ spec:
             claimName: posturesec-db-pvc
 
 ---
-# ---- PostgreSQL Service (ClusterIP  internal only) ----
+# ---- PostgreSQL Service (ClusterIP - internal only) ----
 apiVersion: v1
 kind: Service
 metadata:
@@ -257,7 +257,7 @@ spec:
             timeoutSeconds: 3
 
 ---
-# ---- Backend Service (ClusterIP  internal only) ----
+# ---- Backend Service (ClusterIP - internal only) ----
 apiVersion: v1
 kind: Service
 metadata:
@@ -342,7 +342,7 @@ spec:
             periodSeconds: 5
 
 ---
-# ---- Frontend Service (NodePort  for access via port-forward or node IP) ----
+# ---- Frontend Service (NodePort - for access via port-forward or node IP) ----
 # NOTE: Changed from LoadBalancer because this AWS account does not support
 # creating load balancers. Use `kubectl port-forward svc/posturesec-frontend 8080:80 -n posturesec`
 # to access the frontend locally.
