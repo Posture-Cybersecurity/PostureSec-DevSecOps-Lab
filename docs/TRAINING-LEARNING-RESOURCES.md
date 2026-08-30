@@ -1,10 +1,9 @@
 # PostureSec DevSecOps 101 — Learning Resources
 
-Curated learning resources for every topic covered in the **5-day DevSecOps 101** training course, mapped to the **PostureSec** project (`Posture-Cybersecurity/PostureSec`).
+Curated learning resources for every topic covered in the **DevSecOps 101** training
+course, mapped to this PostureSec teaching application.
 
-**Course schedule:** 9:00 AM – 2:30 PM daily · Breaks: 10:30–10:45 & 12:15–12:30  
-**Project repo:** https://github.com/Posture-Cybersecurity/PostureSec  
-**Branches:** `main` (EC2) · `devops` / `devsecops` (Docker, K8s, Terraform, CI/CD)
+**Project repo:** this repository — paths below are relative to its root.
 
 ---
 

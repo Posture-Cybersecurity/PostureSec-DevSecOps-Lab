@@ -1,10 +1,8 @@
 /**
  * Authentication must work correctly.
  *
- * Everything asserted here is about WHO the caller is — registration, login,
- * session lifetime, revocation, cookie flags and role. Whether an authenticated
- * user MAY act on a particular object is a separate concern, tested in
- * bola.test.js, and it is deliberately not enforced yet.
+ * Everything asserted here is about WHO the caller is: registration, login,
+ * session lifetime, revocation, cookie flags and role.
  */
 const request = require('supertest');
 const { pool, initDB } = require('../src/db');
