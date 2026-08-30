@@ -52,9 +52,13 @@ The split is deliberate: it is the maturity progression you will walk through.
 **One ticket, one branch, one pull request.**
 
 ```
-feature/ONB-006-fix-comment-count      # a ticket you were assigned
-fix/DSO-306-trivy-findings             # a defect
+feature/<ticket-id>-<short-description>   # a ticket you were assigned
+fix/<ticket-id>-<short-description>       # a defect
 ```
+
+Use the ticket's own id, and a short description in lowercase words separated by
+hyphens. The branch name should tell a reviewer what the change is for before
+they open it.
 
 1. Branch from `devsecops`.
 2. Make the smallest change that satisfies the ticket.
