@@ -121,7 +121,28 @@ sudo -u postgres psql -d posturesec_db  # Connect to database
 ### Prerequisites
 
 - Node.js 20+
-- PostgreSQL 16+
+- PostgreSQL 16+ (or Docker, to run the database in a container)
+
+### Database
+
+The backend expects a database and a role to exist before it starts. It creates its
+own **tables** on boot, so there is no migration step — but the database itself is not
+created for you.
+
+**Option A — Docker (simplest).** This starts Postgres with the role, database and
+password already configured to match `.env.example`:
+
+```bash
+docker compose up -d db
+docker compose ps          # wait until the db container reports "healthy"
+```
+
+**Option B — a local PostgreSQL install.** Create the role and database by hand:
+
+```bash
+psql -U postgres -c "CREATE ROLE posturesec_user WITH LOGIN PASSWORD 'posturesec_pass_2026';"
+psql -U postgres -c "CREATE DATABASE posturesec_db OWNER posturesec_user;"
+```
 
 ### Backend
 
@@ -129,16 +150,12 @@ sudo -u postgres psql -d posturesec_db  # Connect to database
 cd backend
 npm install
 
-# Create a .env file (or export these variables)
-export DB_HOST=localhost
-export DB_PORT=5432
-export DB_USER=posturesec_user
-export DB_PASSWORD=posturesec_pass_2026
-export DB_NAME=posturesec_db
-export PORT=5000
+cp .env.example .env       # then edit if your setup differs
 
 npm start
 ```
+
+The backend listens on **port 5000** and creates its tables on first start.
 
 ### Frontend
 
@@ -149,6 +166,31 @@ npm run dev
 ```
 
 The Vite dev server starts on `http://localhost:3000` and proxies `/api` requests to the backend at `http://localhost:5000`.
+
+---
+
+## 🧪 Running the Tests
+
+```bash
+cd backend
+npm test
+```
+
+Things worth knowing before the first run:
+
+- **The database must be running.** The suite talks to a real PostgreSQL instance
+  using the same `.env` as the application — it does not mock the database.
+- **The suite truncates tables between tests.** Point it at a development database
+  only; never at anything whose contents you care about.
+- **Tests run serially** (`jest --runInBand`). Because they share one database,
+  running them in parallel would let workers destroy each other's fixtures.
+
+To run a single file or a single test while you are working:
+
+```bash
+npx jest tests/auth.test.js
+npx jest -t "valid credentials issue a session cookie"
+```
 
 ---
 
