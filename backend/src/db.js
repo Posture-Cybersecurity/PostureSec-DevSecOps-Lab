@@ -1,3 +1,8 @@
+// The pool below is built from the environment at import time, so .env has to be
+// loaded before that happens. index.js also does this, but whoever imports this
+// module first wins — and the test suite imports db.js before index.js.
+require('dotenv').config();
+
 const { Pool } = require('pg');
 
 const pool = new Pool({
