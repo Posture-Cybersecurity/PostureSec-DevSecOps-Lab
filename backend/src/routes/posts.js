@@ -1,14 +1,15 @@
 const express = require('express');
 const router = express.Router();
 const { pool } = require('../db');
+const { requireAuth } = require('../middleware/authenticate');
 
 // GET all posts (newest first)
 router.get('/', async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT p.*, 
-        (SELECT COUNT(*) FROM comments c WHERE c.post_id = p.id) as comment_count
-       FROM posts p 
+      `SELECT p.*,
+        (SELECT COUNT(*) FROM comments c WHERE c.id = p.id) as comment_count
+       FROM posts p
        ORDER BY p.created_at DESC`
     );
     res.json(result.rows);
@@ -42,7 +43,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // CREATE post
-router.post('/', async (req, res) => {
+router.post('/', requireAuth, async (req, res) => {
   const { title, content, author, emoji } = req.body;
 
   if (!title || !content) {
@@ -51,10 +52,10 @@ router.post('/', async (req, res) => {
 
   try {
     const result = await pool.query(
-      `INSERT INTO posts (title, content, author, emoji) 
-       VALUES ($1, $2, $3, $4) 
+      `INSERT INTO posts (title, content, author, emoji, owner_id)
+       VALUES ($1, $2, $3, $4, $5)
        RETURNING *`,
-      [title, content, author || 'Anonymous', emoji || '🛡️']
+      [title, content, author || 'Anonymous', emoji || '🛡️', req.user.id]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -64,7 +65,7 @@ router.post('/', async (req, res) => {
 });
 
 // UPDATE post
-router.put('/:id', async (req, res) => {
+router.put('/:id', requireAuth, async (req, res) => {
   const { title, content, author, emoji } = req.body;
 
   if (!title || !content) {
@@ -92,7 +93,7 @@ router.put('/:id', async (req, res) => {
 });
 
 // DELETE post
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', requireAuth, async (req, res) => {
   try {
     const result = await pool.query('DELETE FROM posts WHERE id = $1 RETURNING *', [req.params.id]);
     if (result.rows.length === 0) {

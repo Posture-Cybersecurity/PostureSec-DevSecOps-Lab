@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { pool } = require('../db');
+const { requireAuth } = require('../middleware/authenticate');
 
 // GET comments for a post
 router.get('/post/:postId', async (req, res) => {
@@ -17,7 +18,7 @@ router.get('/post/:postId', async (req, res) => {
 });
 
 // CREATE comment
-router.post('/', async (req, res) => {
+router.post('/', requireAuth, async (req, res) => {
   const { post_id, author, content } = req.body;
 
   if (!post_id || !content) {
@@ -32,8 +33,8 @@ router.post('/', async (req, res) => {
     }
 
     const result = await pool.query(
-      'INSERT INTO comments (post_id, author, content) VALUES ($1, $2, $3) RETURNING *',
-      [post_id, author || 'Anonymous', content]
+      'INSERT INTO comments (post_id, author, content, owner_id) VALUES ($1, $2, $3, $4) RETURNING *',
+      [post_id, author || 'Anonymous', content, req.user.id]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -43,7 +44,7 @@ router.post('/', async (req, res) => {
 });
 
 // DELETE comment
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', requireAuth, async (req, res) => {
   try {
     const result = await pool.query('DELETE FROM comments WHERE id = $1 RETURNING *', [req.params.id]);
     if (result.rows.length === 0) {
