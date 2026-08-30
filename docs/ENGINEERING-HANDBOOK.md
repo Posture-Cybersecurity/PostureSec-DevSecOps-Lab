@@ -90,6 +90,9 @@ Grok is your AI teammate. It is **external** — you use it at grok.com or in X.
 It is not built into PostureSec, and it never sees this repository unless you paste
 something into it.
 
+This section is how we work day to day. The rules you formally acknowledge are in the
+[AI Use Policy](AI-USE-POLICY.md), which you read and sign alongside this handbook.
+
 ### Use it for
 
 Explaining unfamiliar code · researching an error · drafting a first implementation ·
