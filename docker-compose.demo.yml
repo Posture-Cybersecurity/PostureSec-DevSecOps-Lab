@@ -1,0 +1,87 @@
+# =============================================================================
+# INSTRUCTOR / DEMO ONLY — NOT PART OF THE LEARNER SETUP. NEVER COMMIT THIS.
+# =============================================================================
+# Learners use docker-compose.yml, which publishes Postgres on the normal port
+# 5432 and names the container posturesec-db. That is correct on a clean
+# machine and the documentation must keep teaching it.
+#
+# This file exists for one situation: a workstation that is ALREADY running the
+# main PostureSec platform stack, which owns host port 5432 and the container
+# name posturesec-db. Starting the lab's canonical db there fails with
+# "container name /posturesec-db is already in use".
+#
+# Three deliberate differences from the canonical file, and nothing else:
+#
+#   name:           its own Compose project, so `down` here can never reach a
+#                   container belonging to the platform (Compose targets by
+#                   project label, not by container name).
+#   container_name: lab-demo-db, so the name does not collide.
+#   ports:          host 55432 instead of 5432. The CONTAINER port stays 5432 —
+#                   nothing inside the database moves.
+#
+# This is a SEPARATE file rather than a Compose override because Compose merges
+# `ports:` by APPENDING. An override would produce ["5432:5432","55432:5432"]
+# and still collide on 5432, unless tagged `!override`. A standalone file has
+# no merge semantics to get wrong.
+#
+# The volume is separate too (project-scoped `demopgdata`), so this database
+# cannot read or write the platform's data. Credentials are the lab's own
+# throwaway development values, identical to the committed compose file — no
+# new secret is introduced here and none of this touches production.
+#
+# ONE THING THIS FILE CANNOT CARRY FOR YOU
+#
+# backend/.env is git-ignored, so it is not on this branch and never will be.
+# After checking this branch out you must point the backend at 55432 yourself:
+#
+#     cp backend/.env.example backend/.env
+#     # then edit ONE line:  DB_PORT=55432
+#
+# Leave PORT=5000 alone. frontend/vite.config.js hardcodes its proxy target as
+# http://localhost:5000 and reads no environment variable, so moving the API
+# would mean overriding the Vite config too. The frontend moves with a flag
+# instead, which changes no file:
+#
+#     npm run dev -- --port 53000 --strictPort
+#
+# If DB_PORT is left at 5432 the backend will reach the OTHER PostureSec
+# stack's database and fail authentication — that error means this step was
+# skipped, not that the demo database is broken.
+#
+#   Start:  docker compose -f docker-compose.demo.yml up -d db
+#   Status: docker compose -f docker-compose.demo.yml ps
+#   Stop:   docker compose -f docker-compose.demo.yml stop db
+#
+# DO NOT MERGE THIS BRANCH. It exists so the demo override can be checked out
+# reproducibly instead of living as an untracked file that goes missing when
+# you switch clones — which is exactly what happened before it was created.
+# =============================================================================
+
+name: posturesec-lab-demo
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: lab-demo-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: posturesec_user
+      POSTGRES_PASSWORD: posturesec_pass_2026
+      POSTGRES_DB: posturesec_db
+    ports:
+      # host : container — only the HOST side moves
+      - "55432:5432"
+    volumes:
+      - demopgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U posturesec_user -d posturesec_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    tmpfs:
+      - /tmp
+      - /run
+
+volumes:
+  demopgdata:
