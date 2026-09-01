@@ -26,7 +26,7 @@ jobs:
   # STAGE 1: Linting
   # ==============================================================
   lint:
-    name: "🔍 Lint Code"
+    name: "Lint Code"
     runs-on: ubuntu-latest
     continue-on-error: true
     strategy:
@@ -60,7 +60,7 @@ jobs:
   # STAGE 2: Software Composition Analysis (SCA) — Dependency Audit
   # ==============================================================
   sca:
-    name: "🛡️ Dependency Audit"
+    name: "Dependency Audit"
     runs-on: ubuntu-latest
     continue-on-error: true
     needs: lint
@@ -97,7 +97,7 @@ jobs:
   # STAGE 3: Build & Push Container Images
   # ==============================================================
   build:
-    name: "🐳 Build ${{ matrix.component }}"
+    name: "Build ${{ matrix.component }}"
     runs-on: ubuntu-latest
     continue-on-error: true
     needs: sca
@@ -164,7 +164,7 @@ jobs:
   # STAGE 4: Container Image Scanning (Trivy)
   # ==============================================================
   image-scan:
-    name: "🔬 Scan ${{ matrix.component }} Image"
+    name: "Scan ${{ matrix.component }} Image"
     runs-on: ubuntu-latest
     continue-on-error: true
     needs: build
@@ -198,7 +198,7 @@ jobs:
   # STAGE 5: IaC Security Scan (Checkov) — Terraform + K8s
   # ==============================================================
   iac-scan:
-    name: "🏗️ IaC Security Scan"
+    name: "IaC Security Scan"
     runs-on: ubuntu-latest
     continue-on-error: true
     needs: lint
@@ -230,7 +230,7 @@ jobs:
   # STAGE 6: Dockerfile Lint (Hadolint)
   # ==============================================================
   dockerfile-lint:
-    name: "📋 Dockerfile Lint"
+    name: "Dockerfile Lint"
     runs-on: ubuntu-latest
     continue-on-error: true
     strategy:
@@ -254,7 +254,7 @@ jobs:
   # Only runs on push to main (not on PRs)
   # ==============================================================
   update-manifest:
-    name: "🚀 Update K8s Manifest"
+    name: "Update K8s Manifest"
     runs-on: ubuntu-latest
     continue-on-error: true
     if: github.event_name == 'push'
