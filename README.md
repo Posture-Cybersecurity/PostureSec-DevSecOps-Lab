@@ -1,4 +1,6 @@
+# I'm so happy to make my first commit. 
 # 🛡️ PostureSec — Posture Cybersecurity Platform
+
 
 A cybersecurity knowledge platform built with a 3-tier architecture — React frontend, Node.js backend, and PostgreSQL database.
 
