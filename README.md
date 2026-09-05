@@ -1,4 +1,4 @@
-# I'm so happy to make my first commit. 
+# Jennifer just made her way through her first PR, let's congratulate her. 
 # 🛡️ PostureSec — Posture Cybersecurity Platform
 
 
