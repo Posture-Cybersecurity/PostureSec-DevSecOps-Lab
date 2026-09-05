@@ -70,7 +70,9 @@ router.post('/login', async (req, res) => {
 
     const session = await createSession(user.id);
     res.cookie(SESSION_COOKIE, session.id, cookieOptions(session.expiresAt));
-    res.json({ id: user.id, email: user.email, role: user.role });
+    // Return the signed-in user together with when this session will expire, so
+    // the client can show the user how long they stay signed in.
+    res.json({ ...user, expiresAt: session.expiresAt });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Login failed' });
