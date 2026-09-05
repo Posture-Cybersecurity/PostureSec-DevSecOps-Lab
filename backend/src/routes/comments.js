@@ -20,9 +20,15 @@ router.get('/post/:postId', async (req, res) => {
 // CREATE comment
 router.post('/', requireAuth, async (req, res) => {
   const { post_id, author, content } = req.body;
+  console.log('new comment', req.body);
 
   if (!post_id || !content) {
     return res.status(400).json({ error: 'Post ID and content are required' });
+  }
+
+  // Keep comments short and readable — long walls of text break the layout.
+  if (content.length > 500) {
+    return res.status(400).json({ error: 'Comment must be 500 characters or fewer' });
   }
 
   try {

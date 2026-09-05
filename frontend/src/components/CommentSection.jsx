@@ -4,6 +4,9 @@ import { HiTrash } from 'react-icons/hi2';
 import { createComment, deleteComment } from '../api';
 import toast from 'react-hot-toast';
 
+// Comments are capped so they stay readable and don't break the post layout.
+const MAX_COMMENT_LENGTH = 500;
+
 function CommentSection({ postId, comments, onUpdate }) {
   const [author, setAuthor] = useState('');
   const [content, setContent] = useState('');
@@ -65,7 +68,11 @@ function CommentSection({ postId, comments, onUpdate }) {
             value={content}
             onChange={(e) => setContent(e.target.value)}
             rows={3}
+            maxLength={MAX_COMMENT_LENGTH}
           />
+          <div className="comment-char-count">
+            {content.length}/{MAX_COMMENT_LENGTH}
+          </div>
         </div>
         <button type="submit" className="btn btn-primary btn-sm" disabled={submitting}>
           {submitting ? 'Posting...' : 'Post Comment'}
