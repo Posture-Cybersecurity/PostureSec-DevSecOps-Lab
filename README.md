@@ -1,4 +1,4 @@
-# Maxwell has just made a change. Les congratulate him.
+# Jennifer just made her way through her first PR, let's congratulate her. 
 # 🛡️ PostureSec — Posture Cybersecurity Platform
 
 
