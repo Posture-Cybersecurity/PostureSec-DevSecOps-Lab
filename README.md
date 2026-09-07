@@ -1,4 +1,4 @@
-# Maxwell has just made a change. Les congratulate him.
+# Maxwell has just made a change. Les congratulate him. It's actually my first contribution to this repo.
 # 🛡️ PostureSec — Posture Cybersecurity Platform
 
 
