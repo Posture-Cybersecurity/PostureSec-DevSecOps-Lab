@@ -1,4 +1,8 @@
 # Maxwell has just made a change. Les congratulate him. It's actually my first contribution to this repo.
+
+# Nene has just made a little change. Let's congratulate her.
+# Jennifer just made her way through her first PR, let's congratulate her. 
+
 # 🛡️ PostureSec — Posture Cybersecurity Platform
 
 
