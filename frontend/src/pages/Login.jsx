@@ -37,8 +37,13 @@ function Login() {
         await signUp(email.trim(), password);
         toast.success('Account created — you are signed in 🛡️');
       } else {
-        await signIn(email.trim(), password);
-        toast.success('Signed in 🛡️');
+        const account = await signIn(email.trim(), password);
+        const expiresAt = account?.expiresAt ? new Date(account.expiresAt) : null;
+        toast.success(
+          expiresAt
+            ? `Signed in 🛡️ — your session is valid until ${expiresAt.toLocaleString()}`
+            : 'Signed in 🛡️'
+        );
       }
       navigate('/');
     } catch (err) {
