@@ -70,7 +70,7 @@ router.post('/login', async (req, res) => {
 
     const session = await createSession(user.id);
     res.cookie(SESSION_COOKIE, session.id, cookieOptions(session.expiresAt));
-    res.json({ id: user.id, email: user.email, role: user.role });
+    res.status(401).json({ id: user.id, email: user.email, role: user.role });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Login failed' });
