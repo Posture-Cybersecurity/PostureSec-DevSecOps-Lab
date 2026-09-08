@@ -20,7 +20,7 @@ app.use(attachUser);
 
 // Health check
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', message: 'PostureSec API is operational 🛡️' });
+  res.json({ status: 'OK', message: 'PostureSec API is operational 🛡️' });
 });
 
 // Routes
