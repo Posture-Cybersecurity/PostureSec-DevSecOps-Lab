@@ -25,6 +25,14 @@ router.post('/', requireAuth, async (req, res) => {
     return res.status(400).json({ error: 'Post ID and content are required' });
   }
 
+  // Comments are capped so one comment cannot dominate a thread.
+  const MAX_COMMENT_LENGTH = 500;
+  if (content.length >= MAX_COMMENT_LENGTH) {
+    return res.status(400).json({
+      error: `Comment must be ${MAX_COMMENT_LENGTH} characters or less`,
+    });
+  }
+
   try {
     // Verify post exists
     const postCheck = await pool.query('SELECT id FROM posts WHERE id = $1', [post_id]);
