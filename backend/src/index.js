@@ -32,8 +32,25 @@ app.use('/api/comments', commentRoutes);
 async function start() {
   try {
     await db.initDB();
-    app.listen(PORT, '0.0.0.0', () => {
+    const server = app.listen(PORT, '0.0.0.0', () => {
       console.log(`🚀 PostureSec backend running on port ${PORT}`);
+    });
+    // Listen failures arrive as an async 'error' event on the server, never as
+    // a throw — so the catch below cannot see them. Without this handler the
+    // most common startup failure, a port already in use, surfaces as a raw
+    // stack trace that says nothing about what to do next.
+    server.on('error', (err) => {
+      if (err.code === 'EADDRINUSE') {
+        console.error(`\n✖ Port ${PORT} is already in use.`);
+        console.error('  Something else is serving on this port — most often a');
+        console.error('  previous run of this backend that was never stopped.');
+        console.error('  Run ./demo-preflight.sh to see what owns it.');
+        console.error('  The port is fixed at 5000: frontend/vite.config.js');
+        console.error('  hardcodes it. Do not work around this by changing it.\n');
+      } else {
+        console.error('Failed to start server:', err);
+      }
+      process.exit(1);
     });
   } catch (err) {
     console.error('Failed to start server:', err);
