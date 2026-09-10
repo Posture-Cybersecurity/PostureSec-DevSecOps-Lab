@@ -13,16 +13,27 @@
 # database) long after its database has gone, so it looks alive while every
 # real route returns 500.
 #
-# Ports, and why they are what they are:
-#   55432  host port of lab-demo-db  -> PostgreSQL 5432 inside the container
-#   5000   instructor backend        -> frontend/vite.config.js hardcodes this
-#                                       target and reads no env var
-# Neither is negotiable; see docker-compose.demo.yml and docs/INSTRUCTOR_DEMO.md.
+# THE INSTRUCTOR PORT BAND. The lab moves as a set, clear of every port the
+# main POSTURE platform owns (3000, 8001, 5432, 6379, 8080, 2000):
+#
+#   3900   lab frontend (Vite dev server)
+#   5900   lab backend  (Express API)
+#   55900  host port of lab-demo-db  -> PostgreSQL 5432 inside the container
+#
+# The backend port used to be pinned at 5000 because frontend/vite.config.js
+# hardcoded that proxy target and read no environment variable. It now reads
+# LAB_API_TARGET and LAB_FRONTEND_PORT, defaulting to 5000 and 3000 so the
+# learner path is unchanged — which is what made this band possible at all.
+# See docker-compose.demo.yml and docs/INSTRUCTOR_DEMO.md.
 # =============================================================================
 set -uo pipefail
 
-BACKEND_PORT=5000
-EXPECTED_DB_PORT=55432
+BACKEND_PORT=${LAB_BACKEND_PORT:-5900}
+FRONTEND_PORT=${LAB_FRONTEND_PORT:-3900}
+EXPECTED_DB_PORT=${LAB_DB_PORT:-55900}
+
+# Ports the main POSTURE platform owns. The lab must never publish on these.
+PLATFORM_PORTS="3000 8001 5432 6379 8080 2000"
 EXPECTED_DB_NAME=posturesec_db
 DEMO_CONTAINER=lab-demo-db
 HEALTH_SIGNATURE='PostureSec API is operational'
@@ -72,9 +83,27 @@ say ""
 say "Instructor demo preflight"
 say "========================="
 
+# --- 0. the band itself ------------------------------------------------------
+# A guardrail against the CONFIGURATION, not the machine. If the band is ever
+# edited down onto a platform port, every check below would pass while quietly
+# aiming the lab at the platform's own services.
+say ""
+say "[0/4] Port band"
+for _p in $BACKEND_PORT $FRONTEND_PORT $EXPECTED_DB_PORT; do
+  for _owned in $PLATFORM_PORTS; do
+    if [ "$_p" = "$_owned" ]; then
+      bad "lab port $_p is a port the POSTURE platform owns ($PLATFORM_PORTS)"
+      say ""
+      say "PREFLIGHT FAILED — the lab band overlaps the platform. Nothing was changed."
+      exit 1
+    fi
+  done
+done
+ok "band ${FRONTEND_PORT}/${BACKEND_PORT}/${EXPECTED_DB_PORT} is clear of the platform ($PLATFORM_PORTS)"
+
 # --- 1. backend port ---------------------------------------------------------
 say ""
-say "[1/3] Backend port ${BACKEND_PORT}"
+say "[1/4] Backend port ${BACKEND_PORT}"
 PIDS="$(listeners_on "$BACKEND_PORT")"
 
 if [ -z "$PIDS" ]; then
@@ -114,7 +143,7 @@ fi
 
 # --- 2. demo database container ---------------------------------------------
 say ""
-say "[2/3] Demo database container"
+say "[2/4] Demo database container"
 if ! command -v docker >/dev/null 2>&1; then
   bad "docker not found on PATH"
 elif [ -z "$(docker ps -q -f "name=^${DEMO_CONTAINER}$" 2>/dev/null)" ]; then
@@ -132,7 +161,7 @@ fi
 # Uses the same dotenv + pg path as backend/src/db.js, so this proves the real
 # route rather than an approximation. The password is never printed.
 say ""
-say "[3/3] Database connection as the backend will make it"
+say "[3/4] Database connection as the backend will make it"
 if [ ! -d "$REPO/backend/node_modules" ]; then
   bad "backend/node_modules missing — run: cd backend && npm install"
 else
@@ -171,9 +200,25 @@ else
   fi
 fi
 
+# --- 4. frontend port --------------------------------------------------------
+# Vite is started with strictPort, so an occupied port is a hard failure rather
+# than a silent slide to 3901 that no longer matches the URL on the projector.
+say ""
+say "[4/4] Frontend port ${FRONTEND_PORT}"
+FE_PIDS="$(listeners_on "$FRONTEND_PORT")"
+if [ -z "$FE_PIDS" ]; then
+  ok "port ${FRONTEND_PORT} is free"
+else
+  bad "port ${FRONTEND_PORT} is already held by PID(s): ${FE_PIDS}"
+  say "        Nothing has been stopped. Free it yourself, or start Vite on"
+  say "        another free port with LAB_FRONTEND_PORT."
+fi
+
 say ""
 if [ "$FAIL" -eq 0 ]; then
-  say "PREFLIGHT PASSED — start the backend with:  cd backend && npm start"
+  say "PREFLIGHT PASSED — start the lab with:"
+  say "    cd backend  && npm start"
+  say "    cd frontend && LAB_FRONTEND_PORT=${FRONTEND_PORT} LAB_API_TARGET=http://localhost:${BACKEND_PORT} npm run dev"
 else
   say "PREFLIGHT FAILED — resolve the items marked FAIL above. Nothing was changed."
 fi

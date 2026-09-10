@@ -169,6 +169,33 @@ npm run dev
 
 The Vite dev server starts on `http://localhost:3000` and proxies `/api` requests to the backend at `http://localhost:5000`.
 
+<details>
+<summary><strong>Instructors:</strong> running this alongside the main POSTURE platform</summary>
+
+The platform owns `3000`, `8001`, `5432`, `6379`, `8080` and `2000` on the same
+machine, so the lab's defaults collide with it — the API on `5000` was the one
+that failed outright, with `listen EADDRINUSE`. The lab moves as a set into its
+own band:
+
+| | lab | platform |
+|---|---|---|
+| frontend | **3900** | 3000 |
+| backend | **5900** | 8001 |
+| postgres (host) | **55900** | 5432 |
+
+Nothing inside a container moves, and none of the platform's ports are touched.
+Check the band first — this only looks, it never stops or kills anything:
+
+```bash
+bash demo-preflight.sh
+```
+
+Then follow the run steps in `docker-compose.demo.yml`. **Defaults are
+unchanged**: with no environment variables set, everything above this section
+behaves exactly as written.
+
+</details>
+
 ---
 
 ## 🧪 Running the Tests

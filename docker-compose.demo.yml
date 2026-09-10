@@ -1,54 +1,88 @@
 # =============================================================================
-# INSTRUCTOR / DEMO ONLY — NOT PART OF THE LEARNER SETUP. NEVER COMMIT THIS.
+# INSTRUCTOR / DEMO ONLY — NOT PART OF THE LEARNER SETUP.
 # =============================================================================
 # Learners use docker-compose.yml, which publishes Postgres on the normal port
 # 5432 and names the container posturesec-db. That is correct on a clean
 # machine and the documentation must keep teaching it.
 #
 # This file exists for one situation: a workstation that is ALREADY running the
-# main PostureSec platform stack, which owns host port 5432 and the container
-# name posturesec-db. Starting the lab's canonical db there fails with
-# "container name /posturesec-db is already in use".
+# main POSTURE platform stack. That stack owns these host ports:
 #
-# Three deliberate differences from the canonical file, and nothing else:
+#     3000  platform frontend      6379  platform redis
+#     8001  platform backend       8080  platform tunnel-web
+#     5432  platform postgres      2000  platform cloudflared
+#
+# and the container name posturesec-db. Starting the lab's canonical db there
+# fails with "container name /posturesec-db is already in use", and starting
+# the lab API on its default 5000 failed with `listen EADDRINUSE :::5000` once
+# anything else on the machine had taken it.
+#
+# THE INSTRUCTOR PORT BAND. The lab moves as a set, into a band that touches
+# none of the platform ports above:
+#
+#     3900   lab frontend (Vite dev server)
+#     5900   lab backend  (Express API)
+#     55900  lab postgres ON THE HOST  ->  5432 inside the container
+#
+# Nothing inside any container moves; only the host side. The container port
+# stays 5432 precisely so the database, its healthcheck and every connection
+# string inside Compose are unchanged.
+#
+# Four deliberate differences from the canonical file, and nothing else:
 #
 #   name:           its own Compose project, so `down` here can never reach a
 #                   container belonging to the platform (Compose targets by
-#                   project label, not by container name).
+#                   project label, not by container name). NEVER run a bare
+#                   `docker compose down` from this repo while the platform is
+#                   running — always pass `-f docker-compose.demo.yml`.
 #   container_name: lab-demo-db, so the name does not collide.
-#   ports:          host 55432 instead of 5432. The CONTAINER port stays 5432 —
-#                   nothing inside the database moves.
+#   ports:          host 55900 instead of 5432.
+#   volumes:        project-scoped `demopgdata`, so this database can neither
+#                   read nor write the platform's data.
 #
 # This is a SEPARATE file rather than a Compose override because Compose merges
-# `ports:` by APPENDING. An override would produce ["5432:5432","55432:5432"]
-# and still collide on 5432, unless tagged `!override`. A standalone file has
-# no merge semantics to get wrong.
+# `ports:` by APPENDING. An override would produce ["5432:5432","55900:5432"]
+# and still collide on 5432 unless tagged `!override`. A standalone file has no
+# merge semantics to get wrong.
 #
-# The volume is separate too (project-scoped `demopgdata`), so this database
-# cannot read or write the platform's data. Credentials are the lab's own
-# throwaway development values, identical to the committed compose file — no
-# new secret is introduced here and none of this touches production.
+# Credentials are the lab's own throwaway development values, identical to the
+# committed compose file — no new secret is introduced here, and none of this
+# touches production.
 #
-# ONE THING THIS FILE CANNOT CARRY FOR YOU
+# -----------------------------------------------------------------------------
+# RUNNING THE LAB IN THE INSTRUCTOR BAND
+# -----------------------------------------------------------------------------
+# 0. Check the band is free. This only LOOKS; it never stops or kills anything:
 #
-# backend/.env is git-ignored, so it is not on this branch and never will be.
-# After checking this branch out you must point the backend at 55432 yourself:
+#        bash demo-preflight.sh
 #
-#     cp backend/.env.example backend/.env
-#     # then edit ONE line:  DB_PORT=55432
+# 1. Database:
 #
-# Leave PORT=5000 alone. frontend/vite.config.js hardcodes its proxy target as
-# http://localhost:5000 and reads no environment variable, so moving the API
-# would mean overriding the Vite config too. The frontend moves with a flag
-# instead, which changes no file:
+#        docker compose -f docker-compose.demo.yml up -d db
 #
-#     npm run dev -- --port 53000 --strictPort
+# 2. Backend. backend/.env is git-ignored, so it is not on this branch and
+#    never will be — you must write it yourself:
 #
-# If DB_PORT is left at 5432 the backend will reach the OTHER PostureSec
-# stack's database and fail authentication — that error means this step was
-# skipped, not that the demo database is broken.
+#        cp backend/.env.example backend/.env
+#        # then set BOTH of these in backend/.env:
+#        #     DB_PORT=55900
+#        #     PORT=5900
 #
-#   Start:  docker compose -f docker-compose.demo.yml up -d db
+#    If DB_PORT is left at 5432 the backend reaches the PLATFORM's database and
+#    fails authentication. That error means this step was skipped; it does not
+#    mean the demo database is broken.
+#
+#        cd backend && npm run dev
+#
+# 3. Frontend. vite.config.js now reads both values from the environment and
+#    defaults to 3000 / localhost:5000, so the learner path is unchanged:
+#
+#        cd frontend
+#        LAB_FRONTEND_PORT=3900 LAB_API_TARGET=http://localhost:5900 npm run dev
+#
+#    Open http://localhost:3900. The proxy sends /api to the lab backend on
+#    5900 — never to the platform's 8001.
+#
 #   Status: docker compose -f docker-compose.demo.yml ps
 #   Stop:   docker compose -f docker-compose.demo.yml stop db
 #
@@ -69,8 +103,9 @@ services:
       POSTGRES_PASSWORD: posturesec_pass_2026
       POSTGRES_DB: posturesec_db
     ports:
-      # host : container — only the HOST side moves
-      - "55432:5432"
+      # host : container — only the HOST side moves. 55900 is in the lab band;
+      # 5432 inside the container is untouched.
+      - "55900:5432"
     volumes:
       - demopgdata:/var/lib/postgresql/data
     healthcheck:
