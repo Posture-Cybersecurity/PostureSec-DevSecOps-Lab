@@ -74,14 +74,24 @@
 #
 #        cd backend && npm run dev
 #
-# 3. Frontend. vite.config.js now reads both values from the environment and
-#    defaults to 3000 / localhost:5000, so the learner path is unchanged:
+# 3. Frontend. vite.config.js loads these through Vite's own env mechanism, so
+#    write them ONCE into frontend/.env (git-ignored, like backend/.env):
 #
 #        cd frontend
-#        LAB_FRONTEND_PORT=3900 LAB_API_TARGET=http://localhost:5900 npm run dev
+#        printf 'LAB_FRONTEND_PORT=3900
+LAB_API_TARGET=http://localhost:5900
+' > .env
+#        npm run dev
 #
-#    Open http://localhost:3900. The proxy sends /api to the lab backend on
-#    5900 — never to the platform's 8001.
+#    Plain `npm run dev` is then enough — no variables to export, every time,
+#    for the rest of the class. Open http://localhost:3900; the proxy sends
+#    /api to the lab backend on 5900, never to the platform's 8001.
+#
+#    Defaults remain 3000 / http://localhost:5000, so a learner with no .env is
+#    unaffected. Exporting on the command line still wins over the file, which
+#    is handy for a one-off:
+#
+#        LAB_FRONTEND_PORT=3901 npm run dev
 #
 #   Status: docker compose -f docker-compose.demo.yml ps
 #   Stop:   docker compose -f docker-compose.demo.yml stop db

@@ -20,7 +20,9 @@ died with `listen EADDRINUSE` as soon as anything else claimed that port.
 
 Only host-side ports move. Nothing inside any container changes, and no
 platform port is touched. `frontend/vite.config.js` reads `LAB_FRONTEND_PORT`
-and `LAB_API_TARGET`, defaulting to `3000` and `http://localhost:5000`, so the
+and `LAB_API_TARGET` **through Vite's `loadEnv`**, so they can live in
+`frontend/.env` and plain `npm run dev` picks them up — nothing to export on
+every command. They default to `3000` and `http://localhost:5000`, so the
 learner path in `README.md` stays exactly as written.
 
 ---
