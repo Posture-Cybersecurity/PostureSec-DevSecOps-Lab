@@ -1,5 +1,10 @@
 # Instructor demo environment
 
+> **S0-06 exercise:** this branch also carries the seeded authentication
+> bypass. Its walkthrough, root cause and fix are in
+> [`docs/S0-06-INSTRUCTOR.md`](S0-06-INSTRUCTOR.md) — instructor-only. The
+> student-facing brief lives on `lab/s0-06-simulation`.
+
 **Instructor-only. NOT FOR MERGE to `dev`.** Learners on a clean machine use the
 canonical ports `5432 / 5000 / 3000` documented in `README.md`, and that file is
 deliberately left untouched on this branch.
