@@ -78,9 +78,8 @@
 #    write them ONCE into frontend/.env (git-ignored, like backend/.env):
 #
 #        cd frontend
-#        printf 'LAB_FRONTEND_PORT=3900
-LAB_API_TARGET=http://localhost:5900
-' > .env
+#        echo 'LAB_FRONTEND_PORT=3900'            >  .env
+#        echo 'LAB_API_TARGET=http://localhost:5900' >> .env
 #        npm run dev
 #
 #    Plain `npm run dev` is then enough — no variables to export, every time,
