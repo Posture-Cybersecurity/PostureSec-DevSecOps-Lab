@@ -1,4 +1,7 @@
+# josiah has just made a change.let's congratulate her.
+# Jennifer just made her way through her first PR, let's congratulate her. 
 # 🛡️ PostureSec — Posture Cybersecurity Platform
+
 
 A cybersecurity knowledge platform built with a 3-tier architecture — React frontend, Node.js backend, and PostgreSQL database.
 
