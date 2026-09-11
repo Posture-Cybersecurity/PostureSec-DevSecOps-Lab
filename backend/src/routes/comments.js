@@ -27,7 +27,7 @@ router.post('/', requireAuth, async (req, res) => {
 
   // Comments are capped so one comment cannot dominate a thread.
   const MAX_COMMENT_LENGTH = 500;
-  if (content.length >= MAX_COMMENT_LENGTH) {
+  if (content.length > MAX_COMMENT_LENGTH) {
     return res.status(400).json({
       error: `Comment must be ${MAX_COMMENT_LENGTH} characters or less`,
     });
