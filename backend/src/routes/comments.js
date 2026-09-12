@@ -1,7 +1,12 @@
 const express = require('express');
 const router = express.Router();
 const { pool } = require('../db');
-const { requireAuth } = require('../middleware/authenticate');
+const { requireAuth, requireOwnership } = require('../middleware/authenticate');
+
+const requireCommentOwner = requireOwnership(async (req) => {
+  const result = await pool.query('SELECT owner_id FROM comments WHERE id = $1', [req.params.id]);
+  return result.rows[0]?.owner_id ?? null;
+});
 
 // GET comments for a post
 router.get('/post/:postId', async (req, res) => {
@@ -44,7 +49,7 @@ router.post('/', requireAuth, async (req, res) => {
 });
 
 // DELETE comment
-router.delete('/:id', requireAuth, async (req, res) => {
+router.delete('/:id', requireAuth, requireCommentOwner, async (req, res) => {
   try {
     const result = await pool.query('DELETE FROM comments WHERE id = $1 RETURNING *', [req.params.id]);
     if (result.rows.length === 0) {
