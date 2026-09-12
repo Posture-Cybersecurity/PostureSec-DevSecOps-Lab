@@ -126,16 +126,38 @@ describe('login and session creation', () => {
     expect(rows[0].id.slice(0, 8)).not.toBe(rows[1].id.slice(0, 8));
   });
 
-  test('a wrong password is refused, and no session is created', async () => {
+  // The same account, the same endpoint, one thing different: the password.
+  // Asserting both halves together is the point — a login route that says yes
+  // to everybody passes "the right password works" perfectly well, so that
+  // check alone proves nothing about whether the password was ever verified.
+  test('the password decides: right one in, wrong one out', async () => {
     need();
-    await request(app).post('/api/auth/register').send({ email: 'wp@example.test', password: PW });
-    const res = await request(app)
+    const email = 'wp@example.test';
+    await request(app).post('/api/auth/register').send({ email, password: PW }).expect(201);
+
+    // A. the real password authenticates
+    const good = await request(app).post('/api/auth/login').send({ email, password: PW });
+    expect(good.status).toBe(200);
+    expect(cookieFrom(good)).toBeTruthy();
+
+    // B. the wrong password is refused
+    const bad = await request(app)
       .post('/api/auth/login')
-      .send({ email: 'wp@example.test', password: 'wrong-password-entirely' });
-    expect(res.status).toBe(401);
-    expect(cookieFrom(res)).toBeNull();
+      .send({ email, password: 'wrong-password-entirely' });
+    expect(bad.status).toBe(401);
+    expect(cookieFrom(bad)).toBeNull();
+
+    // C. and it leaves no authenticated session behind — neither a row in the
+    // table nor a cookie the server will honour. A 401 that still issued a
+    // usable session would be a bypass wearing the right status code.
     const { rows } = await pool.query('SELECT * FROM sessions');
-    expect(rows).toHaveLength(0);
+    expect(rows).toHaveLength(1); // only the legitimate login above
+
+    const badCookie = cookieFrom(bad);
+    const me = await request(app)
+      .get('/api/auth/me')
+      .set('Cookie', badCookie || 'psec_session=forged');
+    expect(me.status).toBe(401);
   });
 
   test('an unknown account is refused with the same message — no enumeration', async () => {
