@@ -1,5 +1,36 @@
 # PostureSec Engineering Handbook
 
+# Local Onboarding & Security Practice — ONB-009
+
+Practicing standard engineering documentation standards and formatting options.
+
+## System Architecture Highlights
+
+**PostureSec** runs a 3-tier architecture with **React**, **Node.js**, and **PostgreSQL**.
+
+## Deployment Environments
+
+*Development stages currently supported:*
+* *Local Development (Vite Dev Server)*
+* *Staging Cluster (Containerized)*
+* ***Production Cloud Environment (AWS EC2 / EKS)***
+
+## Key Verification Steps
+
+* Run frontend local server on port 3000
+* Run backend API server on port 5000
+* Verify `/api/health` returns healthy status
+
+---
+
+## Sample Command Execution
+
+Let's test local network connectivity to the backend service:
+
+```bash
+curl -i http://localhost:5000/api/health
+
+
 How we work on this codebase. Read it once, properly — you acknowledge it in **ONB-010**,
 and several later tasks assume you have.
 
