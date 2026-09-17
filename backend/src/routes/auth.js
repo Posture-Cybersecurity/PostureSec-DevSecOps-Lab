@@ -5,37 +5,28 @@ const {
   SESSION_COOKIE,
   hashPassword,
   verifyPassword,
-  createSession,
+  validateRegistrationInput,
+  validateLoginInput,
+  authenticateUser,
+  registerUser,
   revokeSession,
   cookieOptions,
 } = require('../auth');
 const { requireAuth } = require('../middleware/authenticate');
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const MIN_PASSWORD = 12;
-
 // REGISTER
 router.post('/register', async (req, res) => {
   const { email, password } = req.body || {};
 
-  if (!email || !EMAIL_RE.test(email)) {
-    return res.status(400).json({ error: 'A valid email is required' });
-  }
-  if (!password || password.length < MIN_PASSWORD) {
-    return res
-      .status(400)
-      .json({ error: `Password must be at least ${MIN_PASSWORD} characters` });
-  }
-
   try {
-    const hash = await hashPassword(password);
-    const { rows } = await pool.query(
-      `INSERT INTO users (email, password_hash) VALUES ($1, $2)
-       RETURNING id, email, role, created_at`,
-      [email.toLowerCase(), hash]
-    );
+    const result = await registerUser(email, password);
+
+    if (!result.ok) {
+      return res.status(result.status).json({ error: result.error });
+    }
+
     // The hash is never returned. Nothing derived from it is either.
-    res.status(201).json(rows[0]);
+    res.status(201).json(result.user);
   } catch (err) {
     if (err.code === '23505') {
       // Unique violation. Registration necessarily reveals that an address is
@@ -50,25 +41,20 @@ router.post('/register', async (req, res) => {
 // LOGIN
 router.post('/login', async (req, res) => {
   const { email, password } = req.body || {};
-  if (!email || !password) {
-    return res.status(400).json({ error: 'Email and password are required' });
+  const validation = validateLoginInput(email, password);
+
+  if (!validation.ok) {
+    return res.status(validation.status).json({ error: validation.error });
   }
 
   try {
-    const { rows } = await pool.query(
-      'SELECT id, email, role, password_hash FROM users WHERE email = $1',
-      [String(email).toLowerCase()]
-    );
-    const user = rows[0];
+    const result = await authenticateUser(email, password);
 
-    // One message and one status for both "no such user" and "wrong password",
-    // so the endpoint cannot be used to enumerate accounts.
-    const ok = user && (await verifyPassword(password, user.password_hash));
-    if (!ok) {
-      return res.status(401).json({ error: 'Invalid email or password' });
+    if (!result.ok) {
+      return res.status(result.status).json({ error: result.error });
     }
 
-    const session = await createSession(user.id);
+    const { user, session } = result;
     res.cookie(SESSION_COOKIE, session.id, cookieOptions(session.expiresAt));
     res.json({ id: user.id, email: user.email, role: user.role });
   } catch (err) {
