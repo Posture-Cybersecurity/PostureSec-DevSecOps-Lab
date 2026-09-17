@@ -95,10 +95,15 @@ router.put('/:id', requireAuth, async (req, res) => {
 // DELETE post
 router.delete('/:id', requireAuth, async (req, res) => {
   try {
-    const result = await pool.query('DELETE FROM posts WHERE id = $1 RETURNING *', [req.params.id]);
-    if (result.rows.length === 0) {
+    const existing = await pool.query('SELECT * FROM posts WHERE id = $1', [req.params.id]);
+    if (existing.rows.length === 0) {
       return res.status(404).json({ error: 'Post not found' });
     }
+    if (existing.rows[0].owner_id !== req.user.id) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    await pool.query('DELETE FROM posts WHERE id = $1 RETURNING *', [req.params.id]);
     res.json({ message: 'Post deleted successfully 🗑️' });
   } catch (err) {
     console.error(err);
