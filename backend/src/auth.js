@@ -20,9 +20,63 @@ const SESSION_TTL_HOURS = 8;
 // 10 is deliberately modest so the test suite stays fast. Production would use
 // argon2id, or bcrypt at a cost tuned to the hardware.
 const BCRYPT_ROUNDS = 10;
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const MIN_PASSWORD = 12;
 
 const hashPassword = (plain) => bcrypt.hash(plain, BCRYPT_ROUNDS);
 const verifyPassword = (plain, hash) => bcrypt.compare(plain, hash);
+
+const validateRegistrationInput = (email, password) => {
+  if (!email || !EMAIL_RE.test(email)) {
+    return { ok: false, status: 400, error: 'A valid email is required' };
+  }
+  if (!password || password.length < MIN_PASSWORD) {
+    return {
+      ok: false,
+      status: 400,
+      error: `Password must be at least ${MIN_PASSWORD} characters`,
+    };
+  }
+  return { ok: true };
+};
+
+const validateLoginInput = (email, password) => {
+  if (!email || !password) {
+    return { ok: false, status: 400, error: 'Email and password are required' };
+  }
+  return { ok: true };
+};
+
+async function authenticateUser(email, password) {
+  const { rows } = await pool.query(
+    'SELECT id, email, role, password_hash FROM users WHERE email = $1',
+    [String(email).toLowerCase()]
+  );
+  const user = rows[0];
+
+  const ok = user && (await verifyPassword(password, user.password_hash));
+  if (!ok) {
+    return { ok: false, status: 401, error: 'Invalid email or password' };
+  }
+
+  const session = await createSession(user.id);
+  return { ok: true, user, session };
+}
+
+async function registerUser(email, password) {
+  const validation = validateRegistrationInput(email, password);
+  if (!validation.ok) {
+    return validation;
+  }
+
+  const hash = await hashPassword(password);
+  const { rows } = await pool.query(
+    `INSERT INTO users (email, password_hash) VALUES ($1, $2)
+       RETURNING id, email, role, created_at`,
+    [String(email).toLowerCase(), hash]
+  );
+  return { ok: true, user: rows[0] };
+}
 
 /** 256 bits from a CSPRNG. Never Math.random, never a counter, never a UUIDv1. */
 const newSessionId = () => crypto.randomBytes(32).toString('hex');
@@ -88,8 +142,14 @@ const cookieOptions = (expiresAt) => ({
 module.exports = {
   SESSION_COOKIE,
   SESSION_TTL_HOURS,
+  EMAIL_RE,
+  MIN_PASSWORD,
   hashPassword,
   verifyPassword,
+  validateRegistrationInput,
+  validateLoginInput,
+  authenticateUser,
+  registerUser,
   createSession,
   resolveSession,
   revokeSession,
