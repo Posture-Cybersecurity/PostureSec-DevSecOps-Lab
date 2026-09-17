@@ -41,4 +41,16 @@ function requireRole(role) {
   };
 }
 
-module.exports = { attachUser, requireAuth, requireRole };
+/**
+ * Object-level ownership. Compares the stored owner_id to the session user,
+ * never to a client-supplied body field. Numeric compare so pg int vs JS
+ * string ids cannot bypass or lock out the real owner.
+ */
+function isOwner(resource, user) {
+  if (!resource || !user) return false;
+  const ownerId = Number(resource.owner_id);
+  const userId = Number(user.id);
+  return Number.isFinite(ownerId) && ownerId === userId;
+}
+
+module.exports = { attachUser, requireAuth, requireRole, isOwner };

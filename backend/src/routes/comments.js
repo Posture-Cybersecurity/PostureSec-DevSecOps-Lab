@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { pool } = require('../db');
-const { requireAuth } = require('../middleware/authenticate');
+const { requireAuth, isOwner } = require('../middleware/authenticate');
 
 // GET comments for a post
 router.get('/post/:postId', async (req, res) => {
@@ -50,11 +50,14 @@ router.delete('/:id', requireAuth, async (req, res) => {
     if (existing.rows.length === 0) {
       return res.status(404).json({ error: 'Comment not found' });
     }
-    if (existing.rows[0].owner_id !== req.user.id) {
+    if (!isOwner(existing.rows[0], req.user)) {
       return res.status(403).json({ error: 'Forbidden' });
     }
 
-    await pool.query('DELETE FROM comments WHERE id = $1 RETURNING *', [req.params.id]);
+    await pool.query(
+      'DELETE FROM comments WHERE id = $1 AND owner_id = $2 RETURNING *',
+      [req.params.id, req.user.id]
+    );
     res.json({ message: 'Comment deleted 🗑️' });
   } catch (err) {
     console.error(err);
