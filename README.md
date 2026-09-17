@@ -1,4 +1,4 @@
-# Nene has just made a little change. Let's congratulate her.
+# Zeus just made a change 
 # Jennifer just made her way through her first PR, let's congratulate her. 
 # 🛡️ PostureSec — Posture Cybersecurity Platform
 
