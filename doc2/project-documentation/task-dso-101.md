@@ -60,6 +60,16 @@ User/Browser → Nginx :443/:80 → Express :3000 → PostgreSQL :5432
 
 > PostgreSQL :5432 is internal-only. It must never be exposed to the public Internet; only the Express backend may connect to the database.
 
+## Why the database is never public-facing
+
+Because the database is the most sensitive part of the system:
+
+- It stores application data, user records, content, and potentially security-related information.
+- A public PostgreSQL port would create an exposed attack surface directly on the data layer.
+- Attackers could attempt brute-force login attempts, exploit misconfigurations, or connect without going through any application controls.
+- This violates the principle of least privilege: only the trusted backend should talk to the database, not arbitrary Internet clients.
+- It also reduces lateral movement risk. If the web tier is compromised, the attacker still cannot directly reach PostgreSQL from the Internet.
+
 ## Security summary
 
 - Nginx is the only public-facing tier.
