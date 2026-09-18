@@ -11,19 +11,19 @@
 # and passes the environment. See docs for the runbooks.
 # =============================================================================
 
-name: posturesec-warroom-${WARROOM_SQUAD:-1}
+name: posturesec-warroom-${WARROOM_SQUAD:-local}
 
 services:
   db:
     image: postgres:16-alpine
-    container_name: warroom-${WARROOM_SQUAD:-1}-db
+    container_name: warroom-${WARROOM_SQUAD:-local}-db
     restart: unless-stopped
     environment:
       POSTGRES_USER: posturesec_user
       POSTGRES_PASSWORD: posturesec_pass_2026
       POSTGRES_DB: posturesec_db
     ports:
-      - "${WARROOM_DB_PORT:-55951}:5432"
+      - "${WARROOM_DB_PORT:-55432}:5432"
     volumes:
       - warroom_pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -40,7 +40,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: warroom-${WARROOM_SQUAD:-1}-backend
+    container_name: warroom-${WARROOM_SQUAD:-local}-backend
     restart: unless-stopped
     environment:
       PORT: "5000"
@@ -54,7 +54,7 @@ services:
       WAR_ROOM_ENABLED: "true"
       WAR_ROOM_INCIDENT_DELAY_SECONDS: "${WAR_ROOM_INCIDENT_DELAY_SECONDS:-300}"
       WAR_ROOM_INSTRUCTOR_TOKEN: "${WAR_ROOM_INSTRUCTOR_TOKEN:-}"
-      WAR_ROOM_SQUAD: "${WARROOM_SQUAD:-1}"
+      WAR_ROOM_SQUAD: "${WARROOM_SQUAD:-local}"
     expose:
       - "5000"
     depends_on:
@@ -77,10 +77,10 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    container_name: warroom-${WARROOM_SQUAD:-1}-frontend
+    container_name: warroom-${WARROOM_SQUAD:-local}-frontend
     restart: unless-stopped
     ports:
-      - "${WARROOM_HTTP_PORT:-8081}:8080"
+      - "${WARROOM_HTTP_PORT:-8080}:8080"
     depends_on:
       - backend
     security_opt:

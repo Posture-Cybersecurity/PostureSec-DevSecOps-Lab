@@ -1,36 +1,59 @@
 # Sprint 1 War Room — Squad Runbook (INC-001)
 
-Your squad runs its own isolated copy of the PostureSec blogging platform. This
-runbook does not tell you what is wrong. Finding that out is the exercise.
+Your squad runs the **entire** PostureSec blogging platform **on your own
+machine**. Nothing is shared with other squads and nothing depends on a server
+your instructor runs. This runbook does not tell you what is wrong — finding that
+out is the exercise.
 
 ---
 
-## 1. Start your environment
+## 0. What you need
 
-Your instructor gives you your **squad number**.
+- **Docker Desktop** installed and running.
+- **git**.
+- The War Room code from your instructor (a git bundle or a folder).
+
+## 1. Get the code (Team Lead)
+
+If your instructor gave you a **git bundle**:
 
 ```bash
-# from the folder your instructor gave you
-./warroom.sh up <squad>      # builds and starts YOUR isolated app
-./warroom.sh url <squad>     # prints your app URL and database port
+git clone sprint1-war-room-student.bundle warroom
+cd warroom
 ```
 
-Open the app URL (e.g. `http://localhost:808<squad>`). Sign in, write a post, add
-a comment — get familiar with the platform while it is quiet.
+If your instructor gave you a **folder**, just open a terminal in it.
 
-## 2. Join your squad call
+## 2. Start the app locally (Team Lead) — one command
 
-Join your squad's video call and share what you find as you go.
+```bash
+./warroom.sh up
+```
+
+This builds and starts everything on your machine (app, API, and its own
+throwaway database). When it finishes it prints:
+
+```
+Your app is running at:  http://localhost:8080
+```
+
+Open **http://localhost:8080**. It is the same address on every squad's machine —
+there is no URL to wait for. Sign in, write a post, add a comment, and get
+familiar with the platform while it is quiet.
+
+> Everything is local: the timer, the database, and the app all run in Docker on
+> your laptop. You never need a token, a squad number, or a link from anyone.
 
 ## 3. An incident will occur
 
-A few minutes after you start, a security incident is detected. A red alert
-appears across the top of the site. Click **Open incident** to read the brief.
+About five minutes after you start, a security incident is detected on your local
+app. A red alert appears across the top of the site. Click **Open incident** to
+read the brief.
 
-## 4. Investigate
+## 4. Investigate — on your own machine
 
 Use the engineering and security tools you already know. Everything a responder
-needs is available to you:
+needs is right there on your laptop:
 
 - the application's request logs,
 - the application's database,
@@ -40,9 +63,9 @@ needs is available to you:
 Cross-reference them. Reproduce anything you claim, using **your own** test
 accounts — never anyone else's data.
 
-> **AI is allowed, but AI output is not evidence.** If a model proposes a theory,
-> confirm it against the running application, its logs, its database and its
-> source before you write it down.
+> **AI is allowed, but AI output is not evidence.** Confirm every theory against
+> the running application, its logs, its database and its source before you write
+> it down.
 
 ## 5. Produce your answers
 
@@ -72,11 +95,14 @@ evidence (a log line, a query result, a file and line, a commit) for each.
   - **Security** — an unauthenticated caller is refused, and the bad action is
     refused **by the server**.
 
-Write your own tests to demonstrate this.
+Write your own tests to demonstrate this. (The blog's own test suite runs with
+`cd backend && npm test`.)
 
-## 7. When you're done
+## 7. Re-running or stopping
 
-Submit `INC-001-<squad>.md` with evidence for every answer. Leave your stack
-running for the debrief, or stop it with `./warroom.sh down <squad>`.
+- **Re-run the incident from scratch:** `./warroom.sh down` then `./warroom.sh up`
+  (a fresh app, a fresh database, a fresh five-minute fuse).
+- **Stop for the day:** `./warroom.sh down` (removes the app and its local
+  database).
 
 Good hunting. 🛡️

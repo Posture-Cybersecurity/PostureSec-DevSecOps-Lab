@@ -18,54 +18,67 @@ not *object ownership*.
 
 ## PRE-WAR-ROOM
 
+**The student model is local.** Each squad runs the whole app on its **own
+machine** with one command. There is no shared server, no instructor-hosted app,
+no central database, no central timer, and no URL to hand out. Every squad uses
+the same local address — `http://localhost:8080` — because each is on a different
+laptop.
+
 ### What each squad receives (and does not)
 
 - **Receive:** the student handout produced by `./scripts/make-student-handout.sh`
-  (the app + `warroom.sh` + `docs/warroom/LEARNER-RUNBOOK.md`).
+  — either the **folder** `dist/student-handout` or the **git bundle**
+  `dist/sprint1-war-room-student.bundle` (the app + `warroom.sh` +
+  `docs/warroom/LEARNER-RUNBOOK.md`).
 - **Must NOT receive:** `docs/warroom/instructor/**` and
   `backend/tests/warroom_remediation.test.js` (this runbook, the remediation diff,
-  the Fortify model, and the target test suite). The handout script strips these.
+  the Fortify model, and the target test suite). The handout script strips these
+  from BOTH the folder and the bundle and fails if either leaks.
 
 ### Build and distribute the student handout
 
 ```bash
 cd <this repo checkout on feature/sprint1-war-room>
-./scripts/make-student-handout.sh dist/student-handout
-# -> verified: instructor materials absent. Zip/copy dist/student-handout to each squad,
-#    or `git bundle create squad.bundle HEAD` from a checkout of that handout.
+./scripts/make-student-handout.sh
+# -> dist/student-handout/                     (a runnable folder)
+# -> dist/sprint1-war-room-student.bundle      (a cloneable git bundle)
 ```
 
-### One machine per squad (or one shared host)
+Give each squad the bundle (or a zip of the folder). Nothing else — no ports, no
+URL, no token.
 
-Each squad needs Docker + Docker Compose and the handout folder. Ports and the
-Compose project are derived from the squad number, so squads never collide even
-on a single shared host.
-
-| Squad | App URL | DB (host) | Compose project |
-|------:|---------|-----------|-----------------|
-| 1 | http://localhost:8081 | localhost:55951 | posturesec-warroom-1 |
-| 2 | http://localhost:8082 | localhost:55952 | posturesec-warroom-2 |
-| 3 | http://localhost:8083 | localhost:55953 | posturesec-warroom-3 |
-| 4 | http://localhost:8084 | localhost:55954 | posturesec-warroom-4 |
-| 5 | http://localhost:8085 | localhost:55955 | posturesec-warroom-5 |
-| 6 | http://localhost:8086 | localhost:55956 | posturesec-warroom-6 |
-
-Rule: **HTTP port = 8080 + squad**, **DB port = 55950 + squad**.
-
-### Environment preparation (per squad / Team Lead)
+### What each squad's Team Lead does (exactly)
 
 ```bash
-# Instructor sets the fuse and the instructor token for the session.
-export WAR_ROOM_INCIDENT_DELAY_SECONDS=300          # 5-minute default (use 30 to rehearse)
-export WAR_ROOM_INSTRUCTOR_TOKEN='<one secret you keep>'   # optional; a per-squad default is used if unset
-
-./warroom.sh up <squad>       # build + start that squad's isolated stack
-./warroom.sh url <squad>      # prints the app URL, ports, and that squad's token
+git clone sprint1-war-room-student.bundle warroom     # (or unzip the folder)
+cd warroom
+./warroom.sh up                                       # builds + starts locally
+# -> "Your app is running at:  http://localhost:8080"
 ```
 
-The Team Lead runs `./warroom.sh up <squad>` at the start; the fuse begins at that
-moment. Give each Team Lead only their squad number and their app URL. Keep the
-instructor token to yourself (it is only needed for trigger/reset).
+That is the whole setup. The fuse starts at `up`; the incident fires locally after
+~5 minutes; the red banner appears on their own `http://localhost:8080`. Students
+never need a squad number, a URL, or a token.
+
+To re-run from scratch a squad does `./warroom.sh down && ./warroom.sh up`.
+
+### Six squads = six laptops
+
+Because each squad is on its own machine, ports do **not** need to be unique — all
+six use `http://localhost:8080`. No coordination, no collisions, complete
+isolation by virtue of separate machines and separate Docker runtimes.
+
+### INSTRUCTOR REHEARSAL ONLY — several instances on one host (optional)
+
+You do not need this for the class; it is only for testing multiple instances on a
+single machine. Passing a squad number derives unique ports and enables the
+trigger/reset controls:
+
+```bash
+export WAR_ROOM_INSTRUCTOR_TOKEN='<secret>'   # enables trigger/reset
+./warroom.sh up 1 ; ./warroom.sh up 2 ; ...   # HTTP 8080+n, DB 55950+n, project posturesec-warroom-n
+./warroom.sh trigger <n> ; ./warroom.sh reset <n>
+```
 
 ---
 
