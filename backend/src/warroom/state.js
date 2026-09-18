@@ -34,6 +34,7 @@ async function initWarRoom() {
     CREATE TABLE IF NOT EXISTS warroom_access_log (
       id            BIGSERIAL PRIMARY KEY,
       ts            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      request_id    VARCHAR(40),
       method        VARCHAR(10) NOT NULL,
       path          TEXT NOT NULL,
       status        INTEGER,
@@ -44,6 +45,8 @@ async function initWarRoom() {
       duration_ms   INTEGER
     );
   `);
+  // Idempotent for a database created by an earlier version of the table.
+  await pool.query('ALTER TABLE warroom_access_log ADD COLUMN IF NOT EXISTS request_id VARCHAR(40);');
   await pool.query(
     `INSERT INTO warroom_incident (id, status) VALUES ($1, 'idle')
        ON CONFLICT (id) DO NOTHING`,
@@ -98,9 +101,9 @@ async function logAccess(entry) {
   try {
     await pool.query(
       `INSERT INTO warroom_access_log
-         (method, path, status, actor_user_id, actor_email, session_fp, ip, duration_ms)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-      [entry.method, entry.path, entry.status, entry.actorUserId || null,
+         (request_id, method, path, status, actor_user_id, actor_email, session_fp, ip, duration_ms)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      [entry.requestId || null, entry.method, entry.path, entry.status, entry.actorUserId || null,
        entry.actorEmail || null, entry.sessionFp || null, entry.ip || null, entry.durationMs || null]
     );
   } catch (err) {

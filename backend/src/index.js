@@ -10,6 +10,7 @@ const db = require('./db');
 // War Room (Sprint 1) scaffolding — completely inert unless WAR_ROOM_ENABLED.
 const warroom = require('./warroom/config');
 const warroomState = require('./warroom/state');
+const { assignRequestId } = require('./warroom/requestId');
 const { accessLogger } = require('./warroom/logger');
 const incidentRoutes = require('./warroom/routes');
 const { armIncidentTimer } = require('./warroom/timer');
@@ -26,8 +27,11 @@ app.set('trust proxy', true);
 app.use(attachUser);
 
 // Honest request logging is only mounted for the training exercise, so the
-// plain lab keeps its original behaviour and schema.
+// plain lab keeps its original behaviour and schema. A server-generated
+// correlation id is stamped first (and returned as X-Request-ID) so it is
+// present on every response and in every access-log line.
 if (warroom.enabled) {
+  app.use(assignRequestId);
   app.use(accessLogger);
 }
 

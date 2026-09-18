@@ -29,6 +29,7 @@ function accessLogger(req, res, next) {
     if (skip) return;
     const durationMs = Number((process.hrtime.bigint() - started) / 1000000n);
     const entry = {
+      requestId: req.requestId || null,
       method: req.method,
       path,
       status: res.statusCode,
