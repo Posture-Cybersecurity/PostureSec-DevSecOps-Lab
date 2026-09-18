@@ -9,10 +9,10 @@
  *                        root cause, no vulnerability name, no fingers pointed.
  *   warroom_access_log   an honest record of requests: who (session/user), what
  *                        (method + path, so the object id is visible), the
- *                        result, and when. It labels nothing as an "attack".
- *                        The cross-user access is discovered by comparing the
- *                        acting user against the object's owner — real detective
- *                        work, not a spoiler written into the log.
+ *                        result, and when. It labels nothing as an "attack" and
+ *                        draws no conclusion — what happened is pieced together
+ *                        from these facts during the investigation, which is the
+ *                        exercise, not read from a label written into the log.
  */
 const { pool } = require('../db');
 const { incidentId } = require('./config');

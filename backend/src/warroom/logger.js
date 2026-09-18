@@ -5,9 +5,9 @@
  * object id is visible), the response status, the acting user (resolved by the
  * normal auth middleware), a short session fingerprint to correlate a caller's
  * requests, the client address, and the time. It does not judge, classify, or
- * flag anything as malicious — the whole point is that a cross-user action is
- * discovered by comparing the acting user against the object's owner, not by
- * reading a label the platform wrote for you.
+ * flag anything as malicious — the whole point is that what happened is pieced
+ * together from these facts during the investigation, not read from a label the
+ * platform wrote for you.
  *
  * Output goes to the warroom_access_log table and to stdout as one JSON line
  * per request (so `docker logs` is also a valid evidence source). The container

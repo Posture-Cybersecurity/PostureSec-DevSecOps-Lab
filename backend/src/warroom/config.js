@@ -6,8 +6,8 @@
  * reversible: a timer fires a controlled synthetic incident against the app's
  * OWN api using two synthetic accounts, honest request logging records what
  * actually happened, and the homepage raises a generic alarm. The underlying
- * authorization weakness is NOT described anywhere a learner can read — they
- * discover it from the evidence and the source.
+ * weakness is NOT described anywhere a learner can read — they discover it from
+ * the evidence and the source.
  *
  * Fail closed: the instructor-only controls (immediate trigger, reset) require
  * WAR_ROOM_INSTRUCTOR_TOKEN. If it is unset, those controls are disabled.
