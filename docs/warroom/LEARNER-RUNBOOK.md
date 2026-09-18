@@ -1,62 +1,50 @@
 # Sprint 1 War Room — Squad Runbook (INC-001)
 
-Your squad runs its own isolated copy of the PostureSec blogging platform. A few
-minutes after you start it, a security incident will be detected. Your job is to
-run the investigation, contain it, fix it, and prove your fix — using the
-application's own evidence.
-
-This runbook does not tell you what the vulnerability is. Finding that out is the
-exercise.
+Your squad runs its own isolated copy of the PostureSec blogging platform. This
+runbook does not tell you what is wrong. Finding that out is the exercise.
 
 ---
 
-## 1. Start your squad's platform
+## 1. Start your environment
 
-Your instructor gives you your **squad number** and your **instructor token**.
+Your instructor gives you your **squad number**.
 
 ```bash
-# from the repository root
-./warroom.sh up <squad>       # builds and starts YOUR isolated stack
-./warroom.sh url <squad>      # prints your app URL, API and database port
+# from the folder your instructor gave you
+./warroom.sh up <squad>      # builds and starts YOUR isolated app
+./warroom.sh url <squad>     # prints your app URL and database port
 ```
 
-Open the app URL (e.g. `http://localhost:808<squad>`). It should look like a
-normal blogging platform. Create an account, write a post, add a comment — get
-familiar with it while it is quiet.
+Open the app URL (e.g. `http://localhost:808<squad>`). Sign in, write a post, add
+a comment — get familiar with the platform while it is quiet.
 
-**Roughly five minutes after start, an incident fires automatically.** A red
-alert appears across the top of the site. Click **Open incident** to read the
-brief.
+## 2. Join your squad call
 
-> Your instructor can also trigger it on demand, and reset it. You do not need
-> the instructor token for the investigation.
+Join your squad's video call and share what you find as you go.
 
----
+## 3. An incident will occur
 
-## 2. Investigate
+A few minutes after you start, a security incident is detected. A red alert
+appears across the top of the site. Click **Open incident** to read the brief.
 
-The incident brief states a symptom only. Establish the facts yourself. You have
-everything a real responder would:
+## 4. Investigate
 
-| Source | How to reach it |
-|---|---|
-| **Request logs** | `./warroom.sh logs <squad>` (backend stdout), and the `warroom_access_log` table in your database |
-| **Database** | `psql` to your squad's DB port (user `posturesec_user`, db `posturesec_db`) — tables `users`, `sessions`, `posts`, `comments` |
-| **Source code** | `backend/src/` and `frontend/src/` in this repository |
-| **Git history** | `git log`, `git blame` on the files you suspect |
-| **Security tooling** | whatever your squad already uses (linters, `npm audit`, manual review) |
+Use the engineering and security tools you already know. Everything a responder
+needs is available to you:
 
-Cross-reference the sources. A single table or a single log line rarely tells the
-whole story; the truth is in how they line up.
+- the application's request logs,
+- the application's database,
+- the application's source code,
+- the git history.
+
+Cross-reference them. Reproduce anything you claim, using **your own** test
+accounts — never anyone else's data.
 
 > **AI is allowed, but AI output is not evidence.** If a model proposes a theory,
-> confirm it against the running application, the logs, the database and the
-> source before you write it down. An unverified AI claim in your report counts
-> against you, not for you.
+> confirm it against the running application, its logs, its database and its
+> source before you write it down.
 
----
-
-## 3. Answer these — with evidence
+## 5. Produce your answers
 
 Your deliverable is `INC-001-<squad>.md`. Answer every question and cite the
 evidence (a log line, a query result, a file and line, a commit) for each.
@@ -73,48 +61,22 @@ evidence (a log line, a query result, a file and line, a commit) for each.
 ## How do we fix it?
 ```
 
-For **Can we reproduce it?** include the exact requests you made and the
-responses you got. Reproduce with your own two test accounts — never with anyone
-else's data.
+## 6. Contain, fix, and prove it
 
----
+- **Contain** the incident, then **fix the root cause** in the application,
+  server-side. A change only in the browser or the user interface is not a fix.
+- **Prove your fix** with evidence for all four:
+  - **Positive** — a user can still do the legitimate thing to their **own** content.
+  - **Negative** — a user **cannot** do it to **someone else's** content.
+  - **Regression** — normal blogging still works.
+  - **Security** — an unauthenticated caller is refused, and the bad action is
+    refused **by the server**.
 
-## 4. Contain, then fix
+Write your own tests to demonstrate this.
 
-- **Contain** first: state the immediate action that stops the bleeding, and why
-  it is a stopgap rather than a fix.
-- **Fix** the root cause in the application, server-side. A change only in the
-  browser, or only in the user interface, is not a fix.
+## 7. When you're done
 
-## 5. Prove your fix
-
-Your fix must satisfy all four, and you must show the evidence:
-
-- **Positive** — a user can still do the legitimate thing to their **own** content.
-- **Negative** — a user **cannot** do it to **someone else's** content.
-- **Regression** — normal blogging (sign in, post, comment, read) still works.
-- **Security** — an unauthenticated caller is refused, and the cross-user action
-  is refused **by the server**, not just hidden in the UI.
-
-There is a test suite that encodes the target behaviour. Ask your instructor when
-to run it; when your fix is right, it goes green:
-
-```bash
-cd backend && npm run test:remediation
-```
-
-Keep the existing suite green too:
-
-```bash
-cd backend && npm test
-```
-
----
-
-## 6. When you're done
-
-- Submit `INC-001-<squad>.md` with evidence for every answer.
-- Leave your stack running for the debrief, or stop it with
-  `./warroom.sh down <squad>` (this also removes your squad's database).
+Submit `INC-001-<squad>.md` with evidence for every answer. Leave your stack
+running for the debrief, or stop it with `./warroom.sh down <squad>`.
 
 Good hunting. 🛡️
