@@ -7,6 +7,12 @@ const commentRoutes = require('./routes/comments');
 const authRoutes = require('./routes/auth');
 const { attachUser } = require('./middleware/authenticate');
 const db = require('./db');
+// War Room (Sprint 1) scaffolding — completely inert unless WAR_ROOM_ENABLED.
+const warroom = require('./warroom/config');
+const warroomState = require('./warroom/state');
+const { accessLogger } = require('./warroom/logger');
+const incidentRoutes = require('./warroom/routes');
+const { armIncidentTimer } = require('./warroom/timer');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -15,8 +21,15 @@ const PORT = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
 app.use(cookieParser());
+app.set('trust proxy', true);
 // Identity is resolved for every request; routes decide what to do with it.
 app.use(attachUser);
+
+// Honest request logging is only mounted for the training exercise, so the
+// plain lab keeps its original behaviour and schema.
+if (warroom.enabled) {
+  app.use(accessLogger);
+}
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -27,13 +40,23 @@ app.get('/api/health', (req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/posts', postRoutes);
 app.use('/api/comments', commentRoutes);
+// The incident api exists only during the exercise.
+if (warroom.enabled) {
+  app.use('/api/incident', incidentRoutes);
+}
 
 // Initialize database and start server
 async function start() {
   try {
     await db.initDB();
+    if (warroom.enabled) {
+      await warroomState.initWarRoom();
+    }
     app.listen(PORT, '0.0.0.0', () => {
       console.log(`🚀 PostureSec backend running on port ${PORT}`);
+      // Arm the incident fuse only after the server is accepting connections —
+      // the injector makes real requests to this same port.
+      if (warroom.enabled) armIncidentTimer();
     });
   } catch (err) {
     console.error('Failed to start server:', err);

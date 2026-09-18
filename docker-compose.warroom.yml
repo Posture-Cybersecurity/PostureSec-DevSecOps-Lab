@@ -1,0 +1,92 @@
+# =============================================================================
+# WAR ROOM (Sprint 1) — one isolated blogging platform per squad.
+# =============================================================================
+# Every squad runs this file with its own WARROOM_SQUAD number, which sets a
+# distinct Compose PROJECT name. Compose scopes containers, networks and volumes
+# to the project, so `down` for one squad can never reach another squad's
+# resources, and each squad's database is a separate, project-scoped volume.
+# Squad 1 cannot see or affect Squad 2.
+#
+# Do not run this by hand — use ./warroom.sh, which computes the per-squad ports
+# and passes the environment. See docs for the runbooks.
+# =============================================================================
+
+name: posturesec-warroom-${WARROOM_SQUAD:-1}
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: warroom-${WARROOM_SQUAD:-1}-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: posturesec_user
+      POSTGRES_PASSWORD: posturesec_pass_2026
+      POSTGRES_DB: posturesec_db
+    ports:
+      - "${WARROOM_DB_PORT:-55951}:5432"
+    volumes:
+      - warroom_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U posturesec_user -d posturesec_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    tmpfs:
+      - /tmp
+      - /run
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: warroom-${WARROOM_SQUAD:-1}-backend
+    restart: unless-stopped
+    environment:
+      PORT: "5000"
+      DB_USER: posturesec_user
+      DB_PASSWORD: posturesec_pass_2026
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: posturesec_db
+      NODE_ENV: production
+      # War Room scaffolding — on for this exercise only.
+      WAR_ROOM_ENABLED: "true"
+      WAR_ROOM_INCIDENT_DELAY_SECONDS: "${WAR_ROOM_INCIDENT_DELAY_SECONDS:-300}"
+      WAR_ROOM_INSTRUCTOR_TOKEN: "${WAR_ROOM_INSTRUCTOR_TOKEN:-}"
+      WAR_ROOM_SQUAD: "${WARROOM_SQUAD:-1}"
+    expose:
+      - "5000"
+    depends_on:
+      db:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    networks:
+      default:
+        # The stock frontend nginx.conf proxies to the hostname
+        # "posturesec-backend"; expose that name inside THIS squad's network
+        # only, so the base image is reused unchanged and squads stay isolated.
+        aliases:
+          - posturesec-backend
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: warroom-${WARROOM_SQUAD:-1}-frontend
+    restart: unless-stopped
+    ports:
+      - "${WARROOM_HTTP_PORT:-8081}:8080"
+    depends_on:
+      - backend
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  # Project-scoped: becomes posturesec-warroom-<squad>_warroom_pgdata, so each
+  # squad's data lives in its own volume and reset/teardown cannot cross squads.
+  warroom_pgdata:
