@@ -18,3 +18,7 @@ k8s/ghcr-secret.yaml
 # OS
 .DS_Store
 Thumbs.db
+
+# War Room instructor-only materials (answer key / threat model) — kept on the
+# instructor's disk for the debrief, never committed or pushed.
+docs/warroom/instructor/
