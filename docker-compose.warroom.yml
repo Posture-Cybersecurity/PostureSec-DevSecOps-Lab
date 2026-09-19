@@ -30,8 +30,12 @@ services:
       test: ["CMD-SHELL", "pg_isready -U posturesec_user -d posturesec_db"]
       interval: 5s
       timeout: 5s
-      retries: 10
-      start_period: 10s
+      # The FIRST start runs initdb, which on a loaded machine (e.g. another
+      # stack already running) can take well over the default window. A short
+      # start_period made Compose give up mid-init and leave a half-built data
+      # volume, which then failed every retry. Allow ~130s before "unhealthy".
+      retries: 20
+      start_period: 30s
     tmpfs:
       - /tmp
       - /run
