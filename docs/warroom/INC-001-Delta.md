@@ -18,13 +18,43 @@ An authenticated attacker account modified content that belonged to a different 
 - the request succeeded with status `200`
 - the incident alarm fired: `INC-001`
 
-Evidence from the application log:
+Real evidence from the running app during the incident:
 
 ```text
 warroom-local-backend  | [access] {"ts":"2026-09-19T08:59:55.353Z","requestId":"req_5b5474a7b1ac9c47c45d2edc","method":"POST","path":"/api/posts","status":201,"actorUserId":1,"actorEmail":"alice.victim@warroom.local","sessionFp":"5ef55b52","ip":"127.0.0.1","durationMs":2}
 warroom-local-backend  | [access] {"ts":"2026-09-19T08:59:55.458Z","requestId":"req_f3344bdf2160fc814c40f9c2","method":"POST","path":"/api/auth/login","status":200,"actorUserId":null,"actorEmail":null,"sessionFp":null,"ip":"127.0.0.1","durationMs":101}
 warroom-local-backend  | [access] {"ts":"2026-09-19T08:59:55.472Z","requestId":"req_5b397290f15f5a04f88ee0b1","method":"PUT","path":"/api/posts/1","status":200,"actorUserId":2,"actorEmail":"mallory.attacker@warroom.local","sessionFp":"94d3588a","ip":"127.0.0.1","durationMs":6}
 warroom-local-backend  | [warroom] INC-001 fired: {"skipped":false,"post_id":1,"victim_user_id":1,"attacker_user_id":2,"tamper_status":200,"cross_user":true,"succeeded":true,"content_changed":true}
+```
+
+This matches the exact terminal reproduction below:
+
+```bash
+prince-maxwell@prince-maxwell:~/PostureSec-DevSecOps-Lab$ curl -s -c /tmp/posturesec-victim.txt \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"alice.victim@warroom.local","password":"warroom-victim-passphrase-01"}' \
+  http://localhost:8080/api/auth/login
+{"id":1,"email":"alice.victim@warroom.local","role":"user"}
+
+prince-maxwell@prince-maxwell:~/PostureSec-DevSecOps-Lab$ curl -s -b /tmp/posturesec-victim.txt \
+  -H 'Content-Type: application/json' \
+  -X POST http://localhost:8080/api/posts \
+  -d '{"title":"Q3 Threat Intelligence Briefing","content":"Internal draft — indicators of compromise for the Q3 review. Owned by the author.","author":"A. Victim","emoji":"🛡️"}'
+{"id":2,"title":"Q3 Threat Intelligence Briefing","content":"Internal draft — indicators of compromise for the Q3 review. Owned by the author.","author":"A. Victim","emoji":"🛡️","created_at":"2026-09-19T09:24:32.626Z","updated_at":"2026-09-19T09:24:32.626Z","owner_id":1}
+
+prince-maxwell@prince-maxwell:~/PostureSec-DevSecOps-Lab$ curl -s -c /tmp/posturesec-attacker.txt \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"mallory.attacker@warroom.local","password":"warroom-attacker-passphrase-01"}' \
+  http://localhost:8080/api/auth/login
+
+prince-maxwell@prince-maxwell:~/PostureSec-DevSecOps-Lab$ curl -s -b /tmp/posturesec-attacker.txt \
+  -D - \
+  -H 'Content-Type: application/json' \
+  -X PUT http://localhost:8080/api/posts/1 \
+  -d '{"title":"Q3 Threat Intelligence Briefing [EDITED]","content":"This content was replaced by an account that did not author the post.","author":"A. Victim","emoji":"🛡️"}'
+HTTP/1.1 200 OK
+...
+{"id":1,"title":"Q3 Threat Intelligence Briefing [EDITED]","content":"This content was replaced by an account that did not author the post.","author":"A. Victim","emoji":"🛡️","created_at":"2026-09-19T08:59:55.351Z","updated_at":"2026-09-19T09:26:12.776Z","owner_id":1}
 ```
 
 ---
@@ -130,11 +160,12 @@ curl -sS -D /tmp/attacker-edit.headers \
   -d '{"title":"Q3 Threat Intelligence Briefing [EDITED]","content":"This content was replaced by an account that did not author the post.","author":"A. Victim","emoji":"🛡️"}'
 ```
 
-Observed result before the fix:
+Observed result before the fix, from the actual terminal reproduction:
 
 ```text
-HTTP 200
-{"title":"Q3 Threat Intelligence Briefing [EDITED]",...}
+HTTP/1.1 200 OK
+...
+{"id":1,"title":"Q3 Threat Intelligence Briefing [EDITED]","content":"This content was replaced by an account that did not author the post.","author":"A. Victim","emoji":"🛡️","created_at":"2026-09-19T08:59:55.351Z","updated_at":"2026-09-19T09:26:12.776Z","owner_id":1}
 ```
 
 This confirmed the cross-user write vulnerability.
@@ -148,13 +179,16 @@ Containment is a short-term operational step: stop the vulnerable write path and
 ### Containment steps used in terminal
 
 ```bash
-docker compose -f docker-compose.warroom.yml stop backend frontend
+prince-maxwell@prince-maxwell:~/PostureSec-DevSecOps-Lab$ docker compose -f docker-compose.warroom.yml stop backend frontend
+[+] stop 2/2
+ ✔ Container warroom-local-frontend Stopped
+ ✔ Container warroom-local-backend  Stopped
 ```
 
 If you need to preserve evidence before cleanup:
 
 ```bash
-docker exec -i warroom-local-db pg_dump -U posturesec_user posturesec_db > incident-before-fix.sql
+prince-maxwell@prince-maxwell:~/PostureSec-DevSecOps-Lab$ docker exec -i warroom-local-db pg_dump -U posturesec_user posturesec_db > incident-before-fix.sql
 ```
 
 To revoke active sessions at the DB level:
@@ -162,6 +196,15 @@ To revoke active sessions at the DB level:
 ```bash
 docker exec -i warroom-local-db psql -U posturesec_user -d posturesec_db \
   -c "UPDATE sessions SET revoked_at = NOW();"
+
+UPDATE 4
+```
+
+Restore the victim-owned content immediately while evidence is preserved:
+
+```bash
+docker exec -i warroom-local-db psql -U posturesec_user -d posturesec_db \
+  -c "UPDATE posts SET title='Q3 Threat Intelligence Briefing', content='Internal draft — indicators of compromise for the Q3 review. Owned by the author.', author='A. Victim' WHERE id = 1;"
 ```
 
 This prevents further misuse while we ship the server-side fix.
@@ -214,24 +257,40 @@ The fix was validated using both curl-based reproduction and the project test su
 
 ### A) Positive proof — owner can still do the legitimate thing to their own content
 
+Real terminal evidence:
+
 ```bash
+prince-maxwell@prince-maxwell:~/PostureSec-DevSecOps-Lab$ # login as victim
 curl -sS -c /tmp/victim.txt \
   -H 'Content-Type: application/json' \
   -d '{"email":"alice.victim@warroom.local","password":"warroom-victim-passphrase-01"}' \
   http://localhost:8080/api/auth/login
+{"id":1,"email":"alice.victim@warroom.local","role":"user"}
 
+prince-maxwell@prince-maxwell:~/PostureSec-DevSecOps-Lab$ # create a post as the victim
 curl -sS -b /tmp/victim.txt \
   -H 'Content-Type: application/json' \
   -X POST http://localhost:8080/api/posts \
   -d '{"title":"My Post","content":"Body","author":"A. Victim","emoji":"🛡️"}'
+{"id":5,"title":"My Post","content":"Body","author":"A. Victim","emoji":"🛡️","created_at":"2026-09-19T09:49:44.921Z","updated_at":"2026-09-19T09:49:44.921Z","owner_id":1}
 
-curl -sS -b /tmp/victim.txt \
+prince-maxwell@prince-maxwell:~/PostureSec-DevSecOps-Lab$ # update the same post as the owner
+curl -sS -D /tmp/owner-update.headers \
+  -o /tmp/owner-update.body \
+  -b /tmp/victim.txt \
   -H 'Content-Type: application/json' \
   -X PUT http://localhost:8080/api/posts/1 \
   -d '{"title":"My Post v2","content":"Updated by owner","author":"A. Victim","emoji":"🛡️"}'
+
+prince-maxwell@prince-maxwell:~/PostureSec-DevSecOps-Lab$ cat /tmp/owner-update.headers
+HTTP/1.1 200 OK
+...
+
+prince-maxwell@prince-maxwell:~/PostureSec-DevSecOps-Lab$ cat /tmp/owner-update.body
+{"id":1,"title":"My Post v2","content":"Updated by owner","author":"A. Victim","emoji":"🛡️","created_at":"2026-09-19T08:59:55.351Z","updated_at":"2026-09-19T09:49:44.943Z","owner_id":1}
 ```
 
-Expected result: `HTTP 200` and the updated post contents are returned.
+This demonstrates the legitimate owner action still succeeds.
 
 ### B) Negative proof — user cannot do it to someone else’s content
 
@@ -249,10 +308,28 @@ curl -sS -D /tmp/attacker-edit.headers \
   -d '{"title":"Edited by attacker","content":"This should not be allowed","author":"A. Victim","emoji":"🛡️"}'
 ```
 
-Observed result after fix:
+Observed result after fix from the live terminal proof:
 
 ```text
-HTTP 403 Forbidden
+prince-maxwell@prince-maxwell:~/PostureSec-DevSecOps-Lab$ curl -sS -D /tmp/attacker-edit.headers \
+  -o /tmp/attacker-edit.body \
+  -b /tmp/posturesec-attacker.txt \
+  -H 'Content-Type: application/json' \
+  -X PUT http://localhost:8080/api/posts/1 \
+  -d '{"title":"Q3 Threat Intelligence Briefing [EDITED]","content":"This content was replaced by an account that did not author the post.","author":"A. Victim","emoji":"🛡️"}'
+
+prince-maxwell@prince-maxwell:~/PostureSec-DevSecOps-Lab$ cat /tmp/attacker-edit.headers
+HTTP/1.1 403 Forbidden
+Server: nginx/1.27.5
+Date: Sat, 19 Sep 2026 09:40:53 GMT
+Content-Type: application/json; charset=utf-8
+Content-Length: 21
+Connection: keep-alive
+X-Powered-By: Express
+Access-Control-Allow-Origin: *
+...
+
+prince-maxwell@prince-maxwell:~/PostureSec-DevSecOps-Lab$ cat /tmp/attacker-edit.body
 {"error":"Forbidden"}
 ```
 
@@ -260,26 +337,34 @@ The post remained unchanged.
 
 ### C) Regression proof — normal blogging still works
 
+Real terminal evidence:
+
 ```bash
-curl -sS http://localhost:8080/api/posts
+prince-maxwell@prince-maxwell:~/PostureSec-DevSecOps-Lab$ curl -sS http://localhost:8080/api/posts
+[{"id":5,"title":"My Post","content":"Body","author":"A. Victim","emoji":"🛡️","created_at":"2026-09-19T09:49:44.921Z","updated_at":"2026-09-19T09:49:44.921Z","owner_id":1,"comment_count":"0"},
+ {"id":4,"title":"Q3 Threat Intelligence Briefing","content":"Internal draft — indicators of compromise for the Q3 review. Owned by the author.","author":"A. Victim","emoji":"🛡️","created_at":"2026-09-19T09:39:51.244Z","updated_at":"2026-09-19T09:39:51.244Z","owner_id":1,"comment_count":"0"},
+ ...]
 ```
 
-Expected result: `HTTP 200` with the posts list still available to the public.
+This proves the public read path still works.
 
 ### D) Security proof — unauthenticated caller is refused and the server denies the bad action
 
+Real terminal evidence:
+
 ```bash
-curl -sS -D /tmp/anon.headers \
+prince-maxwell@prince-maxwell:~/PostureSec-DevSecOps-Lab$ curl -sS -D /tmp/anon.headers \
   -o /tmp/anon.body \
   -H 'Content-Type: application/json' \
   -X PUT http://localhost:8080/api/posts/1 \
   -d '{"title":"Nope","content":"Unauthorized"}'
-```
 
-Expected result:
+prince-maxwell@prince-maxwell:~/PostureSec-DevSecOps-Lab$ cat /tmp/anon.headers
+HTTP/1.1 401 Unauthorized
+Server: nginx/1.27.5
+...
 
-```text
-HTTP 401 Unauthorized
+prince-maxwell@prince-maxwell:~/PostureSec-DevSecOps-Lab$ cat /tmp/anon.body
 {"error":"Authentication required"}
 ```
 
@@ -306,15 +391,19 @@ Command run:
 cd backend && npx jest tests/incident_proof.test.js --runInBand --forceExit
 ```
 
-Result:
+Result from the actual verification run on this machine:
 
 ```text
+prince-maxwell@prince-maxwell:~/PostureSec-DevSecOps-Lab/backend$ npx jest tests/incident_proof.test.js --runInBand --forceExit
 PASS tests/incident_proof.test.js
   incident proof: object-level authorization
-    ✓ positive: owner can update own post
-    ✓ negative: different user cannot modify someone else's post
-    ✓ security: unauthenticated caller is refused
-    ✓ regression: public reads and normal blogging still work
+    ✓ positive: owner can update own post (667 ms)
+    ✓ negative: different user cannot modify someone else's post (775 ms)
+    ✓ security: unauthenticated caller is refused (534 ms)
+    ✓ regression: public reads and normal blogging still work (420 ms)
+
+Test Suites: 1 passed, 1 total
+Tests:       4 passed, 4 total
 ```
 
 ---
