@@ -73,12 +73,25 @@ router.put('/:id', requireAuth, async (req, res) => {
   }
 
   try {
+    const existing = await pool.query(
+      'SELECT id, owner_id FROM posts WHERE id = $1',
+      [req.params.id]
+    );
+
+    if (existing.rows.length === 0) {
+      return res.status(404).json({ error: 'Post not found' });
+    }
+
+    if (existing.rows[0].owner_id !== req.user.id) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
     const result = await pool.query(
       `UPDATE posts 
        SET title = $1, content = $2, author = $3, emoji = $4, updated_at = NOW() 
-       WHERE id = $5 
+       WHERE id = $5 AND owner_id = $6
        RETURNING *`,
-      [title, content, author || 'Anonymous', emoji || '🛡️', req.params.id]
+      [title, content, author || 'Anonymous', emoji || '🛡️', req.params.id, req.user.id]
     );
 
     if (result.rows.length === 0) {
@@ -95,10 +108,28 @@ router.put('/:id', requireAuth, async (req, res) => {
 // DELETE post
 router.delete('/:id', requireAuth, async (req, res) => {
   try {
-    const result = await pool.query('DELETE FROM posts WHERE id = $1 RETURNING *', [req.params.id]);
+    const existing = await pool.query(
+      'SELECT id, owner_id FROM posts WHERE id = $1',
+      [req.params.id]
+    );
+
+    if (existing.rows.length === 0) {
+      return res.status(404).json({ error: 'Post not found' });
+    }
+
+    if (existing.rows[0].owner_id !== req.user.id) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    const result = await pool.query(
+      'DELETE FROM posts WHERE id = $1 AND owner_id = $2 RETURNING *',
+      [req.params.id, req.user.id]
+    );
+
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Post not found' });
     }
+
     res.json({ message: 'Post deleted successfully 🗑️' });
   } catch (err) {
     console.error(err);

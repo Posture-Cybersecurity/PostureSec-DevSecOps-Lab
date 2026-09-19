@@ -46,10 +46,28 @@ router.post('/', requireAuth, async (req, res) => {
 // DELETE comment
 router.delete('/:id', requireAuth, async (req, res) => {
   try {
-    const result = await pool.query('DELETE FROM comments WHERE id = $1 RETURNING *', [req.params.id]);
+    const existing = await pool.query(
+      'SELECT id, owner_id FROM comments WHERE id = $1',
+      [req.params.id]
+    );
+
+    if (existing.rows.length === 0) {
+      return res.status(404).json({ error: 'Comment not found' });
+    }
+
+    if (existing.rows[0].owner_id !== req.user.id) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    const result = await pool.query(
+      'DELETE FROM comments WHERE id = $1 AND owner_id = $2 RETURNING *',
+      [req.params.id, req.user.id]
+    );
+
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Comment not found' });
     }
+
     res.json({ message: 'Comment deleted 🗑️' });
   } catch (err) {
     console.error(err);
