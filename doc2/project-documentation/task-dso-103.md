@@ -1,10 +1,5 @@
 # DSO-103 — Exercise the API surface
 
-> Recorded by: prince-maxwell
-> Date: 2026-09-18
-> Environment: local backend instance on http://localhost:5000
-> Session owner: prince-maxwell
-
 ## Objective
 
 Exercise the live API surface for:
@@ -263,16 +258,6 @@ This is the important distinction:
 The code comments in [backend/src/middleware/authenticate.js](../../backend/src/middleware/authenticate.js) state this clearly.
 
 ---
-
-## Acceptance criteria status
-
-### Completed
-
-- Demonstrated `/api/health`
-- Demonstrated `/api/posts`
-- Demonstrated `/api/comments`
-- Showed invalid-input rejection
-- Explained the auth middleware position in normal language
 
 ### Evidence summary
 
