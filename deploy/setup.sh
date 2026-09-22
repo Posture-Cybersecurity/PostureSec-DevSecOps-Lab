@@ -7,6 +7,13 @@
 
 set -e
 
+# Resolve the repository root from THIS script's location, so setup works from
+# any checkout path (e.g. ~/PostureSec or ~/PostureSec/PostureSec-DevSecOps-Lab)
+# instead of assuming the source was transferred to ~/PostureSec. The repo root
+# is the parent of deploy/. The deployment TARGET stays /var/www/posturesec.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
 # Database credentials (must match PostgreSQL setup below and backend/.env)
 DB_USER="posturesec_user"
 DB_PASSWORD="posturesec_pass_2026"
@@ -56,8 +63,9 @@ echo "📁 Setting up project..."
 sudo mkdir -p /var/www/posturesec
 sudo chown -R $USER:$USER /var/www/posturesec
 
-# Copy project files (assumes you've transferred them to ~/PostureSec)
-cp -r ~/PostureSec/* /var/www/posturesec/
+# Copy project files from the checked-out repository (resolved above) into the
+# deployment target, wherever the repo happens to live.
+cp -r "$PROJECT_ROOT"/* /var/www/posturesec/
 
 # --- Install backend dependencies ---
 echo "📦 Installing backend dependencies..."
