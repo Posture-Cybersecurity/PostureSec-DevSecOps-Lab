@@ -10,7 +10,7 @@
 # change the Sprint 1 (INC-001) exercise, which runs from the base file alone.
 #
 # NOTE: on the real EC2 monolith the equivalent bound is PM2, not Docker — start
-# the backend with `--max-memory-restart 350M` (see the INC-002 instructor
+# the backend with `--max-memory-restart 300M` (see the INC-002 instructor
 # runbook). This overlay is for local validation and container-based squads.
 # =============================================================================
 services:
