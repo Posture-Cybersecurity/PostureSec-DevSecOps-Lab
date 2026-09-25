@@ -105,6 +105,9 @@ router.post('/trigger', requireInstructor, async (_req, res) => {
 router.post('/reset', requireInstructor, async (_req, res) => {
   try {
     const out = await injector.reset();
+    // A reset also disarms any pending auto-fire fuse, so cleanup cannot be
+    // followed by a surprise incident. Re-running is a fresh boot (down/up).
+    require('./timer').cancelIncidentTimer();
     res.json({ ok: true, ...out });
   } catch (err) {
     console.error('incident reset failed:', err.message);
