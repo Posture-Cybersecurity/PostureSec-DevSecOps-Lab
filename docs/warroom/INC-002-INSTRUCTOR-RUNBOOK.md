@@ -1,215 +1,265 @@
 # INC-002 — Sprint 2 War Room (Instructor Runbook)
 
-**Incident:** INC-002 — a combined SRE + Security incident. An abused API endpoint
+**Incident:** INC-002 — a combined SRE + security incident. An abused API endpoint
 consumes excessive resources, the monolith degrades, the application process
 fails/restarts, and the platform goes intermittently dark. The squad must detect,
 investigate, contain, recover, and discover the **security** root cause.
 
-**Underlying weakness (INSTRUCTOR ONLY — never tell the squad):** OWASP
+**Underlying weakness — INSTRUCTOR ONLY, never tell the squad:** OWASP
 **API4:2023 — Unrestricted Resource Consumption**. `GET /api/posts` is
-unauthenticated, unpaginated, and returns the entire table (plus a per-row
+unauthenticated, unpaginated and returns the whole table (plus a per-row
 subquery), and the app has **no rate limiting** and no result caps. A bounded
-synthetic workload creates many posts and then hammers that endpoint; the process
-exhausts memory/CPU and restarts.
+synthetic workload seeds many posts and then hammers that endpoint until the
+process exhausts memory and PM2 restarts it.
 
-This runbook is for INC-002 only. It does not change the Sprint 1 (INC-001)
-exercise, which is unaffected (`WAR_ROOM_INCIDENT` defaults to `INC-001`).
+**Student-facing symptom (the only thing students are told):**
+> *"Intermittent availability issues. API response times are increasing and users
+> are reporting timeouts."*
 
-> **Four squads, four EC2s.** Each squad has its own isolated monolith
-> (Nginx · PM2 · Node/Express · PostgreSQL). The injector on each box targets
-> only `127.0.0.1` on that box, so triggering Squad *n* cannot touch Squad *m*.
-> You "target a squad" by acting on **that squad's host** (its SSH session and its
-> own instructor token). No IP/host is hard-coded anywhere; each host configures
-> its own `WAR_ROOM_SELF_URL` (defaults to localhost) and token.
+Never reveal to students: **API4 / "Unrestricted Resource Consumption" / the
+endpoint / the injector / the synthetic attacker / pagination / rate limiting.**
+
+> ### Fresh-instance principle
+> **Every squad environment is disposable. A classroom run must be reproducible
+> from a brand-new EC2 instance without relying on any state from a previous run.**
+> The primary supported workflow (Mode A) starts from a fresh EC2. Four squads
+> ultimately run **four isolated EC2 instances — one per squad**, each with its own
+> application, database, War Room state and instructor token. **No shared database,
+> no shared incident state.**
+
+## Start vs. trigger vs. auto-fire (read this first)
+
+- **Start the War Room** = bring the app up in war-room mode. The incident is then
+  **IDLE** and a one-shot fuse is armed.
+- **Auto-fire (the normal classroom path)** = ~300 s after start the fuse fires
+  INC-002 **by itself**. No instructor action. This is what students experience.
+- **Manual trigger** = `POST /api/incident/trigger` (instructor token). An
+  **override for rehearsal/testing only** — **not** part of the normal student flow.
+
+`WAR_ROOM_INCIDENT_DELAY_SECONDS` (default **300**, clamped 5–86400) is only the
+**delay before firing**, not the attack duration. Once fired, the bounded injector
+governs runtime/requests/concurrency/rate and **stops itself** at its limits.
+
+> **Note on the repo scripts.** `warroom.sh` and `docker-compose.warroom.yml` are
+> the **containerized** War Room and default to **INC-001** (they don't set
+> `WAR_ROOM_INCIDENT`). `deploy/setup.sh` builds the **monolith** but starts the
+> backend with the war room **off**. So **INC-002 on the EC2 monolith is started by
+> the PM2 arm command in Mode A step 6** — that is the supported INC-002 start;
+> there is no one-liner script for it yet.
 
 ---
 
-## A. Pre-flight (per target squad)
+# MODE A — FRESH EC2 CLASSROOM START (PRIMARY)
 
-1. **Branch/version.** On the squad host: `git -C /var/www/posturesec rev-parse --abbrev-ref HEAD` → `feature/sprint2-war-room-api4` (or the release tag), and `git log --oneline -1`.
-2. **Target allowlist.** Confirm you are on the intended squad's host (`hostname`, instance id/tag). The injector only ever calls `WAR_ROOM_SELF_URL` (this host); there is no cross-host target to mis-set.
-3. **Application health:** `curl -s http://127.0.0.1/api/health` → `{"status":"ok",...}` (through Nginx) and `curl -s http://127.0.0.1:5000/api/health` (direct).
-4. **PM2:** `pm2 status` → `posturesec-backend` **online**, restarts stable. Record the current restart count.
-5. **Nginx:** `sudo systemctl status nginx` → active; `sudo nginx -t` → ok.
-6. **PostgreSQL:** `pg_isready` → accepting; `psql -c "SELECT 1"`.
-7. **War Room state:** `curl -s http://127.0.0.1:5000/api/incident/status` → `{"active":false,"status":"idle"}`.
-8. **Safety limits.** Confirm the injector bounds are set to safe, tested values (env on the backend): `WAR_ROOM_API4_MAX_POSTS`, `_POST_BYTES`, `_CONCURRENCY`, `_RATE_PER_SEC`, `_MAX_RUNTIME_SECONDS` — all within the clamps in `backend/src/warroom/config.js`. Confirm the process memory bound is armed (below).
-9. **Record baseline resource state:** `free -m` (memory), `uptime`/`top -bn1 | head` (CPU), `df -h` (disk).
+Runs on a brand-new disposable EC2 (Ubuntu). Assume **nothing** is installed or
+configured. Every step says where it runs, what it does, the expected result, and
+what to do on failure.
 
-**Arm the memory bound (makes the failure controlled, not host-threatening).**
-On the EC2 monolith, (re)start the backend under a PM2 memory cap so exhaustion
-restarts only the Node process:
+### A0. Prerequisites (your laptop)
+- An EC2 key (`.pem`) and the instance's public IP.
+- Network access to the Git host and repo read access (deploy key or a short-lived
+  token). Never commit or paste a long-lived token.
+
+### A1. Launch a fresh EC2 and SSH in — *(laptop)*
+```bash
+ssh -i <key>.pem ubuntu@<EC2_PUBLIC_IP>
+```
+- **Does:** opens a shell on the new host.
+- **Expect:** an `ubuntu@ip-…` prompt.
+- **Fail:** timeout → check the security group allows your IP on 22; wrong user →
+  Ubuntu AMIs use `ubuntu`.
+
+### A2. Confirm it is fresh & install git — *(EC2)*
+```bash
+node -v 2>/dev/null; psql --version 2>/dev/null; pm2 -v 2>/dev/null; nginx -v 2>&1
+ls /var/www/posturesec 2>/dev/null && echo "NOT FRESH" || echo "fresh"
+sudo apt-get update -y && sudo apt-get install -y git
+```
+- **Expect:** the version probes print nothing (nothing installed) and `fresh`.
+- **Fail:** if it prints `NOT FRESH` or versions, this host has prior state — use a
+  new instance (fresh-instance principle) or treat it as Mode B.
+
+### A3. Clone the repository — *(EC2)*
+```bash
+cd ~
+git clone https://github.com/Posture-Cybersecurity/PostureSec-DevSecOps-Lab.git
+cd PostureSec-DevSecOps-Lab
+```
+- **Does:** fetches the repo into `~/PostureSec-DevSecOps-Lab`.
+- **Expect:** `Cloning… done.`
+- **Fail:** auth error → the repo is private; use a deploy key or a short-lived
+  token for this clone only, then remove it. Do not persist a token in git config.
+
+### A4. Check out the Sprint 2 branch — *(EC2)*
+```bash
+git checkout feature/sprint2-war-room-api4
+git branch --show-current   # -> feature/sprint2-war-room-api4
+git log -1 --oneline
+```
+- **Expect:** current branch is `feature/sprint2-war-room-api4`.
+- **Fail:** unknown branch → `git fetch origin` then retry.
+
+### A5. Bootstrap the monolith (installs everything) — *(EC2, use tmux)*
+`deploy/setup.sh` installs Node 20, PostgreSQL, Nginx and PM2, creates the DB,
+copies the app to `/var/www/posturesec`, installs backend deps, builds the
+frontend, configures Nginx, and starts the backend (in plain, war-room-**off**
+mode — Mode A step 6 re-arms it for INC-002).
 
 ```bash
-pm2 delete posturesec-backend 2>/dev/null || true
+sudo apt-get install -y tmux
+tmux new -s bootstrap 'bash ~/PostureSec-DevSecOps-Lab/deploy/setup.sh 2>&1 | tee ~/bootstrap.log'
+```
+- **Does:** full first-time provisioning + deploy.
+- **Expect:** ends with `PostureSec is now live!`; `~/bootstrap.log` has no fatal error.
+- **Why tmux:** `setup.sh` runs `apt upgrade`, which can restart networking and
+  **drop your SSH session**; tmux keeps it running. Re-attach with `tmux attach -t
+  bootstrap`. If a package step was interrupted, run
+  `sudo dpkg --configure -a` and re-run `setup.sh` (it is safe to re-run).
+- **Fail:** on a very new Ubuntu, the NodeSource step may lag the distro — install
+  Node 20 by another supported means, then re-run `setup.sh`.
+
+### A6. Start the War Room for INC-002 (the supported INC-002 start) — *(EC2)*
+Generate a one-time instructor token (kept on the host, never printed/shared), then
+(re)start the backend under PM2 in war-room mode with the validated bounds:
+```bash
+umask 077; openssl rand -hex 24 > ~/.warroom_token     # instructor token (secret)
 cd /var/www/posturesec/backend
+pm2 delete posturesec-backend 2>/dev/null || true
 WAR_ROOM_ENABLED=true WAR_ROOM_INCIDENT=INC-002 \
-WAR_ROOM_INSTRUCTOR_TOKEN='<per-squad-token>' \
-WAR_ROOM_INCIDENT_DELAY_SECONDS=86400 \
-pm2 start src/index.js --name posturesec-backend --node-args="--max-old-space-size=256" --max-memory-restart 300M
+WAR_ROOM_INCIDENT_DELAY_SECONDS=300 \
+WAR_ROOM_INSTRUCTOR_TOKEN="$(cat ~/.warroom_token)" \
+pm2 start src/index.js --name posturesec-backend \
+  --node-args="--max-old-space-size=256" --max-memory-restart 300M
 pm2 save
 ```
+- **Does:** arms INC-002 with a **300 s auto-fire fuse** and a **300 M** controlled
+  failure threshold. **You do not trigger anything** — the fuse fires on its own.
+- **Expect:** `pm2 status` shows `posturesec-backend online`; the log line
+  `armed: INC-002 will fire in 300s` (`pm2 logs posturesec-backend --lines 20`).
+- **Failure threshold = 300M (validated).** The default bounded load oscillates RSS
+  to ~350–400 MB (GC between waves); at 350M PM2's sampling missed the breach and
+  did not restart, at **300M** it restarts reliably. Do not raise it, and do not
+  raise the injector bounds to force a restart.
 
-> **Failure threshold = 300M (validated on EC2).** During EC2 E2E the default
-> bounded load drove RSS to ~350–400 MB in oscillating waves (GC reclaims between
-> waves). At `--max-memory-restart 350M` PM2's periodic sampling missed the
-> sustained breach and did **not** restart — degradation was strong but the
-> controlled restart never fired. At **300M** (RSS exceeded 300 MB at nearly every
-> sample) PM2 restarted the process reliably within the same bounded load. Do not
-> raise this above ~300M, and do not raise the injector bounds to force a restart.
-
-(Container-based squads instead use the overlay:
-`docker compose -f docker-compose.warroom.yml -f docker-compose.api4.yml -p posturesec-warroom-<squad> up -d --build`, which sets the same bounds and a 384 MB container cap.)
-
----
-
-## B. Trigger (exact sequence)
-
-INC-002 fires either on the boot timer (`WAR_ROOM_INCIDENT_DELAY_SECONDS`) or on
-your explicit, token-gated command. To fire it now on the squad's host:
-
+### A7. Pre-flight — prove the classroom-ready state — *(EC2)*
 ```bash
-# via the instructor endpoint (token required; fail-closed without it)
-curl -s -X POST http://127.0.0.1:5000/api/incident/trigger \
-  -H "x-warroom-token: <per-squad-token>"
-
-# or the bundled CLI (same endpoint, same token)
-cd /var/www/posturesec/backend
-WAR_ROOM_INSTRUCTOR_TOKEN='<per-squad-token>' node src/warroom/cli.js trigger
+echo "branch:      $(git -C ~/PostureSec-DevSecOps-Lab branch --show-current)"   # feature/sprint2-war-room-api4
+echo "health:      $(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:5000/api/health) (nginx $(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1/api/health))"  # 200 / 200
+echo "incident:    $(curl -s http://127.0.0.1:5000/api/incident/status | grep -o '"status":"[a-z]*"')"     # idle
+echo "delay:       $(pm2 env 0 | grep -E '^WAR_ROOM_INCIDENT_DELAY_SECONDS')"     # 300
+echo "no override: $(pm2 env 0 | grep -c ': 90$')"                                # 0
+echo "synthetic:   users=$(sudo -u postgres psql -d posturesec_db -tAc "SELECT count(*) FROM users WHERE email LIKE '%@warroom.local'")"  # 0
+pm2 jlist | grep -o '"status":"online"' | head -1                                  # online
+pg_isready                                                                         # accepting connections
 ```
+- **Prove:** correct branch · health 200 (direct + Nginx) · **incident IDLE** ·
+  **delay 300** · **no 90 s override** · **0 synthetic War Room rows** · PM2 online ·
+  PostgreSQL accepting · **no manual trigger required**.
+- **Fail:** any check off → do not start the class; fix or use a fresh instance.
 
-The trigger response is the **instructor-only** summary (baseline vs peak latency,
-synthetic posts created, requests sent/failed, `degradation_observed`). If the
-process restarts mid-run, the `curl` may return a connection error — that is the
-incident manifesting; the alarm was already raised (it is set *before* the load).
-
----
-
-## C. What the instructor should observe
-
-- **Request activity:** a burst of `POST /api/posts` from one synthetic actor, then
-  heavy `GET /api/posts` (`pm2 logs posturesec-backend`, the `[access]` JSON lines,
-  and `warroom_access_log`).
-- **Latency/resource degradation:** `duration_ms` on `GET /api/posts` climbing from
-  the baseline; rising memory in `free -m` / `pm2 status`.
-- **Process/application failure:** `pm2 status` restart count increments (memory cap
-  hit) or the container restarts; `/api/health` intermittently fails.
-- **Outage symptoms:** the homepage banner shows the alarm; requests time out.
-- **Incident state:** `GET /api/incident/status` → `active`.
-
----
-
-## D. What students receive (exact brief)
-
-Homepage banner + `GET /api/incident`:
-
-> **P1 INCIDENT** — POSTURESec is experiencing intermittent availability issues.
-> API response times are increasing and users are reporting timeouts.
-> Investigate, contain, recover and determine the root cause.
-
-Plus generic incident-response questions and the evidence sources (logs, DB,
-source, git, and — for INC-002 — process/PM2, Nginx, and host resource state).
-Nothing names a cause, an endpoint, an account, or "API4".
-
----
-
-## E. Evidence the instructor must NOT reveal (discovery only)
-
-Do **not** say any of these — the squad must derive them from evidence:
-- that this is **OWASP API4 / Unrestricted Resource Consumption**;
-- the vulnerable endpoint (`GET /api/posts`);
-- that it is **unauthenticated / unpaginated / returns the whole table**;
-- that there is **no rate limiting**;
-- the synthetic attacker account or the injector;
-- that a bounded synthetic workload caused it.
-
----
-
-## F. Expected investigation path (instructor-only; do not force one route)
-
-1. Confirm the outage (`/api/health`, PM2/container restarts) and the timeframe.
-2. Read the evidence: `warroom_access_log` and `[access]` logs → a spike of
-   `POST /api/posts` then many `GET /api/posts` with rising `duration_ms`.
-3. Correlate by `request_id` / `session_fp` / `actor_email` → one actor, one endpoint.
-4. Inspect the DB → a flood of near-identical posts owned by one account.
-5. Read the source → `GET /api/posts` has no `LIMIT`/pagination, no auth, and there
-   is no rate limiting or result cap anywhere.
-6. Name it: **API4 — Unrestricted Resource Consumption**.
-7. Reproduce safely, then propose controls (see G/H).
-
----
-
-## G. Recovery definitions
-
-- **Containment:** the abuse is stopped/limited — e.g., the injector is halted (it
-  self-stops at its bounds), and/or a control is put in front of the endpoint so a
-  burst no longer degrades the service.
-- **Service recovery:** the application is back online and stable — `pm2 status`
-  online with a stable restart count, `/api/health` green through Nginx.
-- **Root-cause identification:** the squad names the vulnerable endpoint, the
-  missing controls, and the OWASP category (API4), evidenced from logs + source.
-- **Complete resolution:** service restored **and** the missing controls are added
-  (pagination/result cap, rate limiting, request/body limits, resource limits) so a
-  repeat of the same workload no longer causes an outage. Restarting PM2 alone is
-  **not** resolution.
-
----
-
-## H. Expected final student deliverable
-
-An incident report containing:
-1. **Timeline** (detection → recovery).
-2. **Impact** (availability, who/what affected).
-3. **Symptoms** observed.
-4. **Evidence** (log lines, request IDs, DB findings, source references).
-5. **Root cause**.
-6. **OWASP classification** (API4:2023 — Unrestricted Resource Consumption).
-7. **Recovery actions** taken.
-8. **Remediation** (the controls added; must satisfy `warroom_api4_remediation.test.js`).
-9. **Architecture recommendation** (single-VM SPOF → limits, isolation, horizontal
-   scale; ties back to DSO-203/DSO-204).
-
----
-
-## I. Reset (return to a clean initial state)
-
+### A8. Auto-fire validation (NO manual trigger) — *(EC2)*
+Record the start time, confirm it stays idle, then let it fire on its own.
 ```bash
-# token-gated reset: removes ONLY the synthetic @warroom.local account and its
-# posts/comments, clears warroom_access_log, sets the incident back to idle.
-curl -s -X POST http://127.0.0.1:5000/api/incident/reset -H "x-warroom-token: <per-squad-token>"
-# or: node src/warroom/cli.js reset
-pm2 restart posturesec-backend      # bring the process back cleanly if it was down
+echo "start: $(date -u +%FT%TZ)"   # War Room started / fuse armed for +300s
+# ~5 minutes later, watch the automatic transition (do NOT call /trigger):
+watch -n 5 'curl -s http://127.0.0.1:5000/api/incident/status'
 ```
+Expected automatic sequence (no instructor action):
+`IDLE (~300 s)` → **auto-fire → incident active** → increasing `GET /api/posts`
+latency → memory pressure → **PM2 restart** (restart count 0→1) → **recovery**.
+Capture: start · auto-fire scheduled (start+300 s) · auto-fire occurred ·
+degradation began · PM2 restart · recovery. The alarm is raised **before** the
+pressure, so it survives the restart. Do not tell students to "wait for API4."
 
-(Container squads: `docker compose -f docker-compose.warroom.yml -f docker-compose.api4.yml -p posturesec-warroom-<squad> down` for a full teardown, or the reset endpoint to re-run on the same stack.)
+### A9. Switch to STUDENT mode — investigate
+Give students only the symptom (A above / `GET /api/incident`). They investigate
+from evidence (see **Evidence sources**). Do not narrate the root cause.
+
+### A10. Instructor reset — return to a clean state — *(EC2)*
+See **Reset** below. Then re-verify clean before the next squad/run.
 
 ---
 
-## J. Post-incident verification (before the next squad)
+# MODE B — EXISTING INSTANCE / REHEARSAL (NOT the clean-room path)
 
-1. `curl -s http://127.0.0.1:5000/api/incident/status` → `active:false`, `status:idle`.
-2. `pm2 status` → online, restart count stable; `/api/health` green (direct + via Nginx).
-3. `sudo systemctl status nginx` → active; `sudo nginx -t` → ok.
-4. `pg_isready` → accepting.
-5. **No synthetic data:** `psql -c "SELECT count(*) FROM users WHERE email LIKE '%@warroom.local'"` → 0; `psql -c "SELECT count(*) FROM warroom_access_log"` → 0.
-6. Resource state back to baseline (`free -m`, `top`).
-7. **No cross-squad impact:** the other squads' `/api/incident/status` and `/api/health` are unchanged (each is a separate host; verify at least one neighbour).
+For an instance that is **already** bootstrapped and you just want to re-arm or
+rehearse. This is **not** the primary clean-room validation path (that is Mode A on
+a fresh EC2).
+
+- **Re-arm** (same as A6): `pm2 delete posturesec-backend; WAR_ROOM_…=… pm2 start …`.
+- **Rehearsal fast fuse:** set `WAR_ROOM_INCIDENT_DELAY_SECONDS=30` in the arm
+  command to shorten the wait — rehearsal only; classroom default is **300**.
+- **Manual trigger (override):**
+  `curl -s -X POST http://127.0.0.1:5000/api/incident/trigger -H "x-warroom-token: $(cat ~/.warroom_token)"`
+  — use only to test/demo; the normal flow is the auto-fire.
+- **Containerized alternative:** the `warroom.sh` container path defaults to
+  **INC-001**. To run **INC-002** in containers use the overlay:
+  `docker compose -f docker-compose.warroom.yml -f docker-compose.api4.yml -p posturesec-warroom-<squad> up -d --build`.
 
 ---
 
-## K. EC2 end-to-end validation result (2026-09-25)
+## Evidence sources (instructor knows these; students discover them)
 
-Validated on a disposable EC2 monolith (Ubuntu 26.04, 2 vCPU, 3.9 GiB; Node 20 ·
-PostgreSQL 16 · Nginx · PM2), single host, synthetic data only, all hard bounds
-intact, no remediation implemented.
+- **App request log:** `warroom_access_log` (method, path, status, **`duration_ms`**,
+  actor, `request_id`) and the `[access]` JSON lines in `pm2 logs posturesec-backend`.
+- **PM2:** `pm2 status` (restart count), `pm2 logs`, `pm2 monit`.
+- **Nginx:** `sudo systemctl status nginx`, `/var/log/nginx/*.log`.
+- **Application logs / restart evidence:** `pm2 logs` around the restart timestamp.
+- **War Room state:** `GET /api/incident/status` (active), `warroom_incident` row.
+- **Database:** a flood of near-identical posts owned by one synthetic account.
+- **Source & git history:** `GET /api/posts` has no `LIMIT`/pagination/auth; no rate
+  limiting anywhere.
 
-- **Baseline:** health 200 (direct + via Nginx); `GET /api/posts` 200 / ~3 ms; incident idle; PM2 online, restarts=0, ~62 MB; ~3.2 GB free.
-- **Instructor controls:** trigger / reset / status-transition all **403** without a token and with a wrong token (fail-closed); token never printed.
-- **Trigger → degradation:** default bounded injector; 300 synthetic posts; 185 `GET /api/posts`; ~12 MB/response; latency 8 ms → **max 4470 ms** (avg ~1044 ms in `warroom_access_log`); RSS 62 → ~348–400 MB; host stayed > 2.6 GB free.
-- **PM2 restart:** at the **300M** threshold the process restarted (**restarts 0 → 1**) after ~45 s of pressure; outage window < ~4 s. (At 350M it did **not** restart — see the failure-threshold note in §A.)
-- **Incident persistence:** the alarm was raised before the pressure and **survived the restart** (status stayed `active` from PostgreSQL).
-- **Recovery:** mem → ~65–124 MB, `GET /api/posts` → ~150 ms, health 200.
-- **Student non-disclosure:** idle and active briefs are symptom-only; no leak of API4 / the endpoint / the attacker / the injector.
-- **Reset:** incident idle; 0 synthetic users/posts; access log cleared; app + Nginx + PostgreSQL healthy; no runaway process.
-- **Tests on the host:** primary INC-002 suite **7 passed**; remediation suite **2 passed, 2 failed** (pagination + rate-limit RED by design; regression + body-limit pass).
-- **Four-squad:** one EC2 was available, so multi-host isolation E2E remains **pending**; the per-host / per-token / self-target design was validated at single-host level.
+A student who correlates the `duration_ms` spike + the post flood + the source
+reaches **API4 — Unrestricted Resource Consumption**. Do not hand them that phrase.
+
+## Reset (exact) and clean verification — *(EC2)*
+```bash
+curl -s -X POST http://127.0.0.1:5000/api/incident/reset -H "x-warroom-token: $(cat ~/.warroom_token)"
+# prove clean:
+curl -s http://127.0.0.1:5000/api/incident/status | grep -o '"status":"[a-z]*"'                 # idle
+sudo -u postgres psql -d posturesec_db -tAc "SELECT count(*) FROM users WHERE email LIKE '%@warroom.local'"  # 0 synthetic users
+curl -s http://127.0.0.1:5000/api/posts | grep -oc '"id"'                                        # 0 synthetic posts
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:5000/api/health                        # 200
+pgrep -af 'incident/trigger' | wc -l                                                             # 0 (no runaway injector)
+pm2 jlist | grep -o '"status":"online"'; pg_isready                                              # online / accepting
+```
+Reset removes only the synthetic `@warroom.local` account and its posts/comments,
+clears `warroom_access_log`, sets the incident idle, and **disarms any pending
+fuse**. To run again, restart the process (re-arm, A6) or launch a fresh instance.
+
+## Safety (unchanged — do not loosen)
+Injector hard bounds stay: `maxPosts ≤ 2000`, `concurrency ≤ 32`, `rate ≤ 200/s`,
+`maxRuntimeSec ≤ 300`, `maxRequests ≤ 50000`, per-request timeout, **fixed
+self-target and fixed endpoint**, synthetic data only, automatic stop at the
+bounds. Never point the injector at another host, never add arbitrary target URLs,
+never remove the timeout, and never make normal firing depend on a manual trigger.
+
+## Final student deliverable
+Incident timeline · impact · symptoms · evidence · root cause · **OWASP
+classification (API4:2023)** · recovery actions · remediation (must satisfy
+`warroom_api4_remediation.test.js`) · architecture recommendation.
+
+---
+
+## Appendix — EC2 end-to-end validation result (2026-09-25)
+
+Validated on a disposable EC2 (Ubuntu 26.04, 2 vCPU, 3.9 GiB; Node 20 · PostgreSQL
+16 · Nginx · PM2), single host, synthetic data only, all bounds intact, no
+remediation.
+
+- **Automatic path (no manual trigger):** started, healthy/idle held ~90 s (test
+  fuse) → **auto-fired on its own** → `GET /api/posts` 8 ms → ~1.4 s, RSS 60 →
+  ~357 MB → **PM2 restart 0→1** at the 300 M threshold → recovery → reset clean.
+  (Default fuse remains 300 s; validated at 90 s to keep the observation bounded.)
+- **Manual trigger (override):** token-gated (403 without/with wrong token); works
+  as an override; not required for the student flow.
+- **Failure threshold:** 350 M did not restart (RSS oscillation missed PM2's
+  sampling); **300 M** restarts reliably under the same bounded load.
+- **Non-disclosure:** idle and active briefs are symptom-only; no leak.
+- **Reset:** idle; 0 synthetic users/posts; access log cleared; app/Nginx/PostgreSQL
+  healthy; no runaway process.
+- **Tests on host:** primary INC-002 **7 passed**; remediation **2 passed / 2
+  failed** (pagination + rate-limit RED by design; regression + body-limit pass).
+- **Four-squad:** one EC2 was available → multi-host isolation E2E **pending**; the
+  per-host / per-token / self-target design was validated at single-host level.
