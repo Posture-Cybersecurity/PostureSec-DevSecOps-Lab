@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
 # =============================================================================
-# War Room (Sprint 1) control script.
+# War Room control script (Sprint 1 INC-001 / Sprint 2 INC-002).
+#
+# PREREQUISITE: Docker Engine + the Compose plugin must already be installed and
+# running. On a fresh Ubuntu EC2 run `sudo bash deploy/warroom-ec2-bootstrap.sh`
+# ONCE first (then re-login or `newgrp docker`); on a laptop install Docker
+# Desktop. This script starts the War Room; it does NOT install Docker.
+#
+# INCIDENT: this branch defaults to INC-002 (Sprint 2, API4), selected by
+# layering docker-compose.api4.yml over the base file. Run the Sprint 1 exercise
+# with `WAR_ROOM_INCIDENT=INC-001 ./warroom.sh up`.
 #
 # STUDENT / single-machine use (the default — no squad number needed):
 #
@@ -20,10 +29,11 @@
 # instructor trigger/reset controls:
 #
 #   ./warroom.sh up 1 ; ./warroom.sh up 2 ; ...   (HTTP 8080+n, DB 55950+n)
-#   ./warroom.sh trigger <n>   fire INC-001 now      (needs WAR_ROOM_INSTRUCTOR_TOKEN)
-#   ./warroom.sh reset   <n>   restore initial state (needs WAR_ROOM_INSTRUCTOR_TOKEN)
+#   ./warroom.sh trigger <n>   fire the incident now  (needs WAR_ROOM_INSTRUCTOR_TOKEN)
+#   ./warroom.sh reset   <n>   restore initial state  (needs WAR_ROOM_INSTRUCTOR_TOKEN)
 #
-# The fuse delay defaults to 300s; export WAR_ROOM_INCIDENT_DELAY_SECONDS=30
+# Normal classroom flow needs NO trigger: the incident fires automatically on the
+# fuse. The fuse delay defaults to 300s; export WAR_ROOM_INCIDENT_DELAY_SECONDS=30
 # to rehearse quickly.
 # =============================================================================
 set -euo pipefail
@@ -55,7 +65,18 @@ export WAR_ROOM_INCIDENT_DELAY_SECONDS="${WAR_ROOM_INCIDENT_DELAY_SECONDS:-300}"
 # Empty in student mode => instructor trigger/reset are disabled (fail closed).
 export WAR_ROOM_INSTRUCTOR_TOKEN="${WAR_ROOM_INSTRUCTOR_TOKEN:-}"
 
+# Which incident to run. This branch defaults to INC-002 (Sprint 2, API4), which
+# is selected by layering the API4 overlay on top of the base compose file: the
+# overlay sets WAR_ROOM_INCIDENT=INC-002 and the bounded memory cap that makes the
+# resource-exhaustion failure restart only this container. INC-001 (Sprint 1) runs
+# from the base file alone. No other value is valid — fail closed on a typo.
+export WAR_ROOM_INCIDENT="${WAR_ROOM_INCIDENT:-INC-002}"
 COMPOSE=(docker compose -f docker-compose.warroom.yml)
+case "$WAR_ROOM_INCIDENT" in
+  INC-002) COMPOSE+=(-f docker-compose.api4.yml) ;;
+  INC-001) : ;;
+  *) echo "unknown WAR_ROOM_INCIDENT '${WAR_ROOM_INCIDENT}' (expected INC-001 or INC-002)" >&2; exit 2 ;;
+esac
 APP_URL="http://localhost:${WARROOM_HTTP_PORT}"
 API_URL="${APP_URL}/api"
 
@@ -63,7 +84,7 @@ token_hdr=(-H "x-warroom-token: ${WAR_ROOM_INSTRUCTOR_TOKEN}")
 
 case "$cmd" in
   up)
-    echo "==> building and starting locally (port ${WARROOM_HTTP_PORT}, fuse ${WAR_ROOM_INCIDENT_DELAY_SECONDS}s)"
+    echo "==> building and starting ${WAR_ROOM_INCIDENT} locally (port ${WARROOM_HTTP_PORT}, fuse ${WAR_ROOM_INCIDENT_DELAY_SECONDS}s)"
     "${COMPOSE[@]}" up -d --build
     echo "==> waiting for the app..."
     for _ in $(seq 1 60); do
