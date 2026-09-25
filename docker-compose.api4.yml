@@ -1,0 +1,30 @@
+# =============================================================================
+# INC-002 (Sprint 2, API4) overlay — use WITH the base War Room compose:
+#
+#   docker compose -f docker-compose.warroom.yml -f docker-compose.api4.yml \
+#     -p posturesec-warroom-<squad> up -d --build
+#
+# It selects INC-002 and CAPS the backend's memory so the API4 resource-
+# exhaustion incident is BOUNDED: a heap OOM restarts only this one container
+# (base policy `restart: unless-stopped`), never the host. This overlay does not
+# change the Sprint 1 (INC-001) exercise, which runs from the base file alone.
+#
+# NOTE: on the real EC2 monolith the equivalent bound is PM2, not Docker — start
+# the backend with `--max-memory-restart 350M` (see the INC-002 instructor
+# runbook). This overlay is for local validation and container-based squads.
+# =============================================================================
+services:
+  backend:
+    environment:
+      WAR_ROOM_INCIDENT: "INC-002"
+      # Low heap ceiling: exhaustion crashes THIS process quickly and safely.
+      NODE_OPTIONS: "--max-old-space-size=256"
+      # Injector bounds (all clamped again in config.js). Tune from local testing.
+      WAR_ROOM_API4_MAX_POSTS: "${WAR_ROOM_API4_MAX_POSTS:-300}"
+      WAR_ROOM_API4_POST_BYTES: "${WAR_ROOM_API4_POST_BYTES:-40000}"
+      WAR_ROOM_API4_CONCURRENCY: "${WAR_ROOM_API4_CONCURRENCY:-8}"
+      WAR_ROOM_API4_RATE_PER_SEC: "${WAR_ROOM_API4_RATE_PER_SEC:-20}"
+      WAR_ROOM_API4_MAX_RUNTIME_SECONDS: "${WAR_ROOM_API4_MAX_RUNTIME_SECONDS:-45}"
+    # Hard container memory cap → any OOM is contained to this container.
+    mem_limit: 384m
+    memswap_limit: 384m

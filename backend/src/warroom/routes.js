@@ -16,7 +16,8 @@ const express = require('express');
 const router = express.Router();
 const config = require('./config');
 const { getIncident, publicIncident, setStatus } = require('./state');
-const injector = require('./injector');
+// Dispatches to the configured incident's injector (INC-001 default, INC-002 API4).
+const injector = require('./incidents');
 
 function tokenOk(req) {
   const expected = config.instructorToken;
@@ -50,14 +51,20 @@ router.get('/', async (_req, res) => {
   try {
     const row = await getIncident();
     const pub = publicIncident(row);
+    // Symptom-level brief only — never a cause, endpoint or account. INC-001
+    // (Sprint 1) keeps its exact wording; INC-002 (Sprint 2, availability) uses
+    // its own symptom brief and adds process/proxy/OS evidence sources. Both
+    // still make the squad discover the root cause.
+    const api4 = config.incident === 'INC-002';
+    const activeBrief = api4
+      ? 'POSTURESec is experiencing intermittent availability issues. API response times '
+        + 'are increasing and users are reporting timeouts. Investigate, contain, recover, '
+        + 'and determine the root cause — confirm it with evidence.'
+      : 'Unexpected changes were observed to published content on this platform. '
+        + 'Investigate what happened, establish who and what was affected, and confirm it with evidence.';
     res.json({
       ...pub,
-      // Symptom-level brief only. This deliberately does not name a cause,
-      // an endpoint, or any account — that is the squad's to discover.
-      brief: pub.active
-        ? 'Unexpected changes were observed to published content on this platform. '
-          + 'Investigate what happened, establish who and what was affected, and confirm it with evidence.'
-        : 'No active incident.',
+      brief: pub.active ? activeBrief : 'No active incident.',
       investigate: [
         'What happened?',
         'How did it happen?',
@@ -72,6 +79,11 @@ router.get('/', async (_req, res) => {
         'The application database (users, sessions, posts, comments)',
         'The application source code',
         'Git history',
+        ...(api4 ? [
+          'Process / application state (PM2 or the container process, restarts)',
+          'The reverse proxy (Nginx) state and its logs',
+          'Host resource pressure (CPU, memory) during the window',
+        ] : []),
       ],
     });
   } catch (err) {

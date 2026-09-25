@@ -7,16 +7,16 @@
  * the process — or a test — can clear it).
  */
 const config = require('./config');
-const injector = require('./injector');
+const incidents = require('./incidents');
 
 function armIncidentTimer() {
   if (!config.enabled) return null;
   const ms = config.delaySeconds * 1000;
-  console.log(`[warroom] armed: INC-001 will fire in ${config.delaySeconds}s (squad=${config.squad})`);
+  console.log(`[warroom] armed: ${config.incident} will fire in ${config.delaySeconds}s (squad=${config.squad})`);
   const handle = setTimeout(async () => {
     try {
-      const summary = await injector.runIncident();
-      console.log(`[warroom] INC-001 fired: ${JSON.stringify(summary)}`);
+      const summary = await incidents.runIncident();
+      console.log(`[warroom] ${config.incident} fired: ${JSON.stringify(summary)}`);
     } catch (err) {
       console.error('[warroom] scheduled incident failed:', err.message);
     }

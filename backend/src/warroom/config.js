@@ -43,6 +43,28 @@ const config = {
   incidentId: 'INC-001',
 };
 
+// Which incident this instance runs. Default INC-001 (Sprint 1) so NOTHING about
+// the existing exercise changes unless INC-002 is explicitly selected.
+const _INCIDENTS = ['INC-001', 'INC-002'];
+const _sel = (process.env.WAR_ROOM_INCIDENT || 'INC-001').trim().toUpperCase();
+config.incident = _INCIDENTS.includes(_sel) ? _sel : 'INC-001';
+config.incidentId = config.incident;
+
+// INC-002 (API4 — Unrestricted Resource Consumption) injector bounds. Every
+// value is a HARD, clamped safety limit. The injector ONLY targets THIS
+// application (config.selfBaseUrl) on this ONE endpoint — it is not a general
+// load generator, accepts no arbitrary URL, and stops itself at these bounds.
+config.api4 = {
+  endpoint: '/api/posts',                                            // fixed; never client-supplied
+  maxPosts: num('WAR_ROOM_API4_MAX_POSTS', 300, 1, 2000),            // synthetic-record ceiling
+  postSizeBytes: num('WAR_ROOM_API4_POST_BYTES', 40000, 500, 90000), // < the 100kb express.json cap
+  concurrency: num('WAR_ROOM_API4_CONCURRENCY', 8, 1, 32),           // parallel in-flight requests
+  ratePerSec: num('WAR_ROOM_API4_RATE_PER_SEC', 20, 1, 200),         // request-rate ceiling
+  maxRuntimeSec: num('WAR_ROOM_API4_MAX_RUNTIME_SECONDS', 45, 5, 300), // HARD auto-stop
+  maxRequests: num('WAR_ROOM_API4_MAX_REQUESTS', 5000, 10, 50000),   // absolute request ceiling
+  perRequestTimeoutMs: num('WAR_ROOM_API4_REQ_TIMEOUT_MS', 10000, 500, 30000),
+};
+
 // Synthetic, obviously-fake accounts. Tagged so reset can find and remove
 // exactly these and nothing a learner created. Never real people.
 config.actors = {
