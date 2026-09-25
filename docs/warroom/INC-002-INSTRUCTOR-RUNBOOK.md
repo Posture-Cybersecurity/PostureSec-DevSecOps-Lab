@@ -46,9 +46,17 @@ cd /var/www/posturesec/backend
 WAR_ROOM_ENABLED=true WAR_ROOM_INCIDENT=INC-002 \
 WAR_ROOM_INSTRUCTOR_TOKEN='<per-squad-token>' \
 WAR_ROOM_INCIDENT_DELAY_SECONDS=86400 \
-pm2 start src/index.js --name posturesec-backend --node-args="--max-old-space-size=256" --max-memory-restart 350M
+pm2 start src/index.js --name posturesec-backend --node-args="--max-old-space-size=256" --max-memory-restart 300M
 pm2 save
 ```
+
+> **Failure threshold = 300M (validated on EC2).** During EC2 E2E the default
+> bounded load drove RSS to ~350–400 MB in oscillating waves (GC reclaims between
+> waves). At `--max-memory-restart 350M` PM2's periodic sampling missed the
+> sustained breach and did **not** restart — degradation was strong but the
+> controlled restart never fired. At **300M** (RSS exceeded 300 MB at nearly every
+> sample) PM2 restarted the process reliably within the same bounded load. Do not
+> raise this above ~300M, and do not raise the injector bounds to force a restart.
 
 (Container-based squads instead use the overlay:
 `docker compose -f docker-compose.warroom.yml -f docker-compose.api4.yml -p posturesec-warroom-<squad> up -d --build`, which sets the same bounds and a 384 MB container cap.)
@@ -186,3 +194,22 @@ pm2 restart posturesec-backend      # bring the process back cleanly if it was d
 5. **No synthetic data:** `psql -c "SELECT count(*) FROM users WHERE email LIKE '%@warroom.local'"` → 0; `psql -c "SELECT count(*) FROM warroom_access_log"` → 0.
 6. Resource state back to baseline (`free -m`, `top`).
 7. **No cross-squad impact:** the other squads' `/api/incident/status` and `/api/health` are unchanged (each is a separate host; verify at least one neighbour).
+
+---
+
+## K. EC2 end-to-end validation result (2026-09-25)
+
+Validated on a disposable EC2 monolith (Ubuntu 26.04, 2 vCPU, 3.9 GiB; Node 20 ·
+PostgreSQL 16 · Nginx · PM2), single host, synthetic data only, all hard bounds
+intact, no remediation implemented.
+
+- **Baseline:** health 200 (direct + via Nginx); `GET /api/posts` 200 / ~3 ms; incident idle; PM2 online, restarts=0, ~62 MB; ~3.2 GB free.
+- **Instructor controls:** trigger / reset / status-transition all **403** without a token and with a wrong token (fail-closed); token never printed.
+- **Trigger → degradation:** default bounded injector; 300 synthetic posts; 185 `GET /api/posts`; ~12 MB/response; latency 8 ms → **max 4470 ms** (avg ~1044 ms in `warroom_access_log`); RSS 62 → ~348–400 MB; host stayed > 2.6 GB free.
+- **PM2 restart:** at the **300M** threshold the process restarted (**restarts 0 → 1**) after ~45 s of pressure; outage window < ~4 s. (At 350M it did **not** restart — see the failure-threshold note in §A.)
+- **Incident persistence:** the alarm was raised before the pressure and **survived the restart** (status stayed `active` from PostgreSQL).
+- **Recovery:** mem → ~65–124 MB, `GET /api/posts` → ~150 ms, health 200.
+- **Student non-disclosure:** idle and active briefs are symptom-only; no leak of API4 / the endpoint / the attacker / the injector.
+- **Reset:** incident idle; 0 synthetic users/posts; access log cleared; app + Nginx + PostgreSQL healthy; no runaway process.
+- **Tests on the host:** primary INC-002 suite **7 passed**; remediation suite **2 passed, 2 failed** (pagination + rate-limit RED by design; regression + body-limit pass).
+- **Four-squad:** one EC2 was available, so multi-host isolation E2E remains **pending**; the per-host / per-token / self-target design was validated at single-host level.
