@@ -1,0 +1,118 @@
+# Sprint 2 War Room — Squad Runbook (INC-002)
+
+Your squad runs the **entire** PostureSec blogging platform **on your own
+machine**. Nothing is shared with other squads and nothing depends on a server
+your instructor runs. This runbook does not tell you what is wrong — finding that
+out is the exercise.
+
+---
+
+## 0. What you need
+
+- **Docker** installed and running (Docker Desktop on a laptop, or Docker Engine
+  on your squad's Ubuntu box).
+- **git**.
+- The War Room code from your instructor (a git bundle or a folder).
+
+## 1. Get the code (Team Lead)
+
+If your instructor gave you a **git bundle**:
+
+```bash
+git clone <bundle-file> warroom
+cd warroom
+```
+
+If your instructor gave you a **folder**, just open a terminal in it.
+
+## 2. Start the app locally (Team Lead) — one command
+
+```bash
+./warroom.sh up
+```
+
+This builds and starts everything on your machine (app, API, and its own
+throwaway database). When it finishes it prints:
+
+```
+Your app is running at:  http://localhost:8080
+```
+
+Open **http://localhost:8080**. It is the same address on every squad's machine —
+there is no URL to wait for. Sign in, write a post, add a comment, and get
+familiar with the platform while it is quiet.
+
+> Everything is local: the timer, the database, and the app all run in Docker on
+> your own machine. You never need a token, a squad number, or a link from anyone.
+
+## 3. An incident will occur
+
+About five minutes after you start, a security incident is detected on your local
+app. A red alert appears across the top of the site. Click **Open incident** to
+read the brief. What you are told is only the **symptom**:
+
+> *"Intermittent availability issues. API response times are increasing and users
+> are reporting timeouts."*
+
+Working out the cause — and proving it — is your job.
+
+## 4. Investigate — on your own machine
+
+Use the engineering and security tools you already know. Everything a responder
+needs is right there on your own machine:
+
+- the application's request logs,
+- the application's database,
+- the application's source code,
+- the git history,
+- how the running application behaves while the incident is active (its
+  responsiveness, its logs, and the state of its process).
+
+Cross-reference them. Reproduce anything you claim, using **your own** test
+accounts — never anyone else's data.
+
+> **AI is allowed, but AI output is not evidence.** Confirm every theory against
+> the running application, its logs, its database and its source before you write
+> it down.
+
+## 5. Produce your answers
+
+Your deliverable is `INC-002-<squad>.md`. Answer every question and cite the
+evidence (a log line, a query result, a file and line, a commit) for each.
+
+```markdown
+# INC-002 Incident Report — Squad <n>
+
+## What happened?
+## How did it happen?
+## What was the impact? (availability, and who was affected)
+## How many users were affected?
+## Can we reproduce it?
+## How do we contain it?
+## How do we fix it?
+## How do we prevent it from recurring?
+```
+
+## 6. Contain, fix, and prove it
+
+- **Contain** the incident, then **fix the root cause** in the application,
+  server-side. A change only in the browser or the user interface is not a fix.
+- **Prove your fix** with evidence for all four:
+  - **Positive** — a legitimate user can still read and use the platform normally.
+  - **Negative** — the pattern that caused the outage no longer takes the service
+    down; the server refuses or safely limits it.
+  - **Regression** — normal blogging still works (sign in, post, comment).
+  - **Security** — the protection is enforced **by the server**, not the browser,
+    and an unauthenticated caller cannot make the platform unavailable to others.
+
+Write your own tests to demonstrate this. (The blog's own test suite runs with
+`cd backend && npm test`.)
+
+## 7. Re-running or stopping
+
+- **Re-run the incident from scratch:** `./warroom.sh down` then `./warroom.sh up`
+  (a fresh app, a fresh database, a fresh five-minute fuse).
+- **Stop for the day:** `./warroom.sh down` (removes the app and its local
+  database).
+
+Good hunting. 🛡️
