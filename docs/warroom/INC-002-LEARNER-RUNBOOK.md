@@ -68,6 +68,16 @@ needs is right there on your own machine:
 - how the running application behaves while the incident is active (its
   responsiveness, its logs, and the state of its process).
 
+Some commands to get you started (run them from your War Room folder):
+
+```bash
+./warroom.sh status                      # the current incident state / brief
+./warroom.sh logs                        # tail the backend request log
+curl -i http://localhost:8080/api/health # is the API responding, and how fast?
+docker ps                                # are the containers up? any restarting?
+docker stats                             # live CPU / memory use per container
+```
+
 Cross-reference them. Reproduce anything you claim, using **your own** test
 accounts — never anyone else's data.
 
