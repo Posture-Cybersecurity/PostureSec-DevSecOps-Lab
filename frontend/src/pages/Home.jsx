@@ -35,7 +35,7 @@ function Home() {
     <div>
       <div className="home-header">
         <h1>Welcome to PostureSec 🛡️</h1>
-        <p>The cybersecurity knowledge platform by Posture by NLNG DevSecOps Engineers of the future inside and out I'm excited thanks, Its a new dawn Share threat intel, security insights, and best practices.</p>
+        <p>This is a local deployment of my Engineering project, I love what I'm seeing, this is done by Emmanuel of braco Sqaud</p>
         <div className="vibe-tags">
           <span className="vibe-tag">🔒 threat intel</span>
           <span className="vibe-tag">🛡️ zero trust</span>

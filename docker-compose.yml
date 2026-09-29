@@ -2,14 +2,14 @@ services:
   # ---- PostgreSQL Database ----
   db:
     image: postgres:16-alpine
-    container_name: posturesec-db
+    container_name: posturesec-db1
     restart: unless-stopped
     environment:
       POSTGRES_USER: posturesec_user
       POSTGRES_PASSWORD: posturesec_pass_2026
       POSTGRES_DB: posturesec_db
     ports:
-      - "5432:5432"
+      - "55900:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
