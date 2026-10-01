@@ -41,4 +41,29 @@ function requireRole(role) {
   };
 }
 
-module.exports = { attachUser, requireAuth, requireRole };
+/** Object-level authorization: allow owner or admin, otherwise 403. */
+function requireOwnership(getOwnerId) {
+  return async (req, res, next) => {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    try {
+      const ownerId = await getOwnerId(req);
+      if (ownerId == null) {
+        return res.status(404).json({ error: 'Resource not found' });
+      }
+
+      if (req.user.role === 'admin' || Number(ownerId) === Number(req.user.id)) {
+        return next();
+      }
+
+      return res.status(403).json({ error: 'Forbidden' });
+    } catch (err) {
+      console.error('ownership check failed:', err.message);
+      return res.status(500).json({ error: 'Authorization failed' });
+    }
+  };
+}
+
+module.exports = { attachUser, requireAuth, requireRole, requireOwnership };

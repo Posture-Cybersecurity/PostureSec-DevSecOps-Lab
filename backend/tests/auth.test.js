@@ -202,6 +202,40 @@ describe('authentication middleware', () => {
   });
 });
 
+describe('authorization', () => {
+  test('a user cannot update or delete another user\'s post', async () => {
+    need();
+
+    const alice = await registerAndLogin('alice@example.test');
+    const bob = await registerAndLogin('bob@example.test');
+
+    const created = await request(app)
+      .post('/api/posts')
+      .set('Cookie', alice.cookie)
+      .send({ title: 'Alice post', content: 'Owned by Alice' })
+      .expect(201);
+
+    const forbiddenUpdate = await request(app)
+      .put(`/api/posts/${created.body.id}`)
+      .set('Cookie', bob.cookie)
+      .send({ title: 'Hacked title', content: 'Nope' });
+
+    expect(forbiddenUpdate.status).toBe(403);
+
+    const forbiddenDelete = await request(app)
+      .delete(`/api/posts/${created.body.id}`)
+      .set('Cookie', bob.cookie);
+
+    expect(forbiddenDelete.status).toBe(403);
+
+    const persisted = await request(app)
+      .get(`/api/posts/${created.body.id}`)
+      .set('Cookie', alice.cookie);
+
+    expect(persisted.body.title).toBe('Alice post');
+  });
+});
+
 describe('logout and revocation', () => {
   test('logout revokes the session server-side, not just in the browser', async () => {
     need();
