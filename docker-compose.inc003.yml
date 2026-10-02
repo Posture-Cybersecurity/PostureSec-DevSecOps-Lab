@@ -1,0 +1,36 @@
+# =============================================================================
+# INC-003 (Sprint 3, DSO-W3 — "the image is compromised") overlay — use WITH the
+# base War Room compose:
+#
+#   docker compose -f docker-compose.warroom.yml -f docker-compose.inc003.yml \
+#     -p posturesec-warroom-<squad> up -d --build
+#
+# ./warroom.sh layers this automatically when WAR_ROOM_INCIDENT=INC-003.
+#
+# What it does, and only this:
+#   * Builds the backend from Dockerfile.inc003-vulnerable instead of the normal
+#     backend/Dockerfile. That image is the REAL Lab backend with a synthetic
+#     TRAINING credential baked into an image LAYER (and present in the final
+#     filesystem). The running container is therefore genuinely compromised — the
+#     secret ships INSIDE THE IMAGE. There is NO runtime bind mount: nothing is
+#     injected at run time, so `docker run <image>` alone already contains it.
+#   * Selects INC-003 so the Sprint 3 injector reads the baked credential at the
+#     detector path (/app/training-canary.env) and raises a GENERIC, symptom-level
+#     operational alert. The injector only READS it; it never returns the value.
+#
+# The synthetic canary (backend/training-canary.env) authenticates to nothing and
+# is never sent anywhere — no real credentials, no registry, no network. The
+# image-layer forensics (RED / the "delete isn't remediation" trap / GREEN) are
+# proven on real backend images by warroom/inc003/verify.sh.
+#
+# This overlay does NOT change the Sprint 1 (INC-001) or Sprint 2 (INC-002)
+# exercises, which run from the base file (plus the API4 overlay for INC-002), and
+# it does NOT change the normal, secure backend image used everywhere else.
+# =============================================================================
+services:
+  backend:
+    build:
+      # context stays ./backend (from the base file); only the Dockerfile changes.
+      dockerfile: Dockerfile.inc003-vulnerable
+    environment:
+      WAR_ROOM_INCIDENT: "INC-003"
