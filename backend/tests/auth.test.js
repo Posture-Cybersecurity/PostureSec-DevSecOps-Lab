@@ -202,6 +202,49 @@ describe('authentication middleware', () => {
   });
 });
 
+describe('post ownership authorization', () => {
+  test('only the post owner can update or delete it', async () => {
+    need();
+    const alice = await registerAndLogin('alice-owner@example.test');
+    const bob = await registerAndLogin('bob-owner@example.test');
+    const created = await request(app)
+      .post('/api/posts')
+      .set('Cookie', alice.cookie)
+      .send({ title: 'Alice post', content: 'Original content' })
+      .expect(201);
+
+    await request(app)
+      .put(`/api/posts/${created.body.id}`)
+      .set('Cookie', bob.cookie)
+      .send({ title: 'Bob edit', content: 'Unauthorized content' })
+      .expect(404);
+
+    const unchanged = await request(app).get(`/api/posts/${created.body.id}`).expect(200);
+    expect(unchanged.body.title).toBe('Alice post');
+    expect(unchanged.body.content).toBe('Original content');
+
+    await request(app)
+      .put(`/api/posts/${created.body.id}`)
+      .set('Cookie', alice.cookie)
+      .send({ title: 'Alice updated', content: 'Owner edit' })
+      .expect(200);
+
+    await request(app)
+      .delete(`/api/posts/${created.body.id}`)
+      .set('Cookie', bob.cookie)
+      .expect(404);
+
+    expect((await request(app).get(`/api/posts/${created.body.id}`)).status).toBe(200);
+
+    await request(app)
+      .delete(`/api/posts/${created.body.id}`)
+      .set('Cookie', alice.cookie)
+      .expect(200);
+
+    expect((await request(app).get(`/api/posts/${created.body.id}`)).status).toBe(404);
+  });
+});
+
 describe('logout and revocation', () => {
   test('logout revokes the session server-side, not just in the browser', async () => {
     need();

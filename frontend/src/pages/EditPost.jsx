@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { getPost, updatePost } from '../api';
+import { useAuth } from '../context/AuthContext';
 import { HiArrowLeft } from 'react-icons/hi2';
 import toast from 'react-hot-toast';
 
@@ -9,6 +10,7 @@ const EMOJIS = ['🛡️', '🔒', '🔐', '💻', '🚨', '⚠️', '🔍', '�
 function EditPost() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { user, loading: authLoading } = useAuth();
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [author, setAuthor] = useState('');
@@ -17,12 +19,17 @@ function EditPost() {
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    fetchPost();
-  }, [id]);
+    if (!authLoading) fetchPost();
+  }, [id, authLoading]);
 
   const fetchPost = async () => {
     try {
       const res = await getPost(id);
+      if (!user || String(user.id) !== String(res.data.owner_id)) {
+        toast.error('You can only edit your own posts.');
+        navigate(`/post/${id}`, { replace: true });
+        return;
+      }
       setTitle(res.data.title);
       setContent(res.data.content);
       setAuthor(res.data.author);
@@ -60,7 +67,7 @@ function EditPost() {
     }
   };
 
-  if (loading) {
+  if (loading || authLoading) {
     return (
       <div className="loading">
         <div className="loading-spinner" />

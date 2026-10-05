@@ -1,0 +1,41 @@
+[1mdiff --git a/docs/ENGINEERING-HANDBOOK.md b/docs/ENGINEERING-HANDBOOK.md[m
+[1mindex fbc6323..a0e2a22 100644[m
+[1m--- a/docs/ENGINEERING-HANDBOOK.md[m
+[1m+++ b/docs/ENGINEERING-HANDBOOK.md[m
+[36m@@ -1,5 +1,36 @@[m
+ # PostureSec Engineering Handbook[m
+ [m
+[32m+[m[32m# Local Onboarding & Security Practice — ONB-009[m
+[32m+[m
+[32m+[m[32mPracticing standard engineering documentation standards and formatting options.[m
+[32m+[m
+[32m+[m[32m## System Architecture Highlights[m
+[32m+[m
+[32m+[m[32m**PostureSec** runs a 3-tier architecture with **React**, **Node.js**, and **PostgreSQL**.[m
+[32m+[m
+[32m+[m[32m## Deployment Environments[m
+[32m+[m
+[32m+[m[32m*Development stages currently supported:*[m
+[32m+[m[32m* *Local Development (Vite Dev Server)*[m
+[32m+[m[32m* *Staging Cluster (Containerized)*[m
+[32m+[m[32m* ***Production Cloud Environment (AWS EC2 / EKS)***[m
+[32m+[m
+[32m+[m[32m## Key Verification Steps[m
+[32m+[m
+[32m+[m[32m* Run frontend local server on port 3000[m
+[32m+[m[32m* Run backend API server on port 5000[m
+[32m+[m[32m* Verify `/api/health` returns healthy status[m
+[32m+[m
+[32m+[m[32m---[m
+[32m+[m
+[32m+[m[32m## Sample Command Execution[m
+[32m+[m
+[32m+[m[32mLet's test local network connectivity to the backend service:[m
+[32m+[m
+[32m+[m[32m```bash[m
+[32m+[m[32mcurl -i http://localhost:5000/api/health[m
+[32m+[m
+[32m+[m
+ How we work on this codebase. Read it once, properly — you acknowledge it in **ONB-010**,[m
+ and several later tasks assume you have.[m
+ [m
