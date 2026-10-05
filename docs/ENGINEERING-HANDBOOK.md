@@ -2,6 +2,27 @@
 
 How we work on this codebase. Read it once, properly — you acknowledge it in **ONB-010**,
 and several later tasks assume you have.
+# Local Onboarding & Security Practice – ONB-009
+
+## Objective
+Document local setup, architecture, and verification steps so repository documentation changes are clear and discoverable for the next engineer.
+
+## Architecture Highlights
+* **Frontend:** React / Vite Dev Server (Port 3000)
+* **Backend:** Node.js / Express API (Port 5000)
+* **Database:** PostgreSQL
+
+## Environments
+* **Local:** Vite + Express
+* **Staging:** Docker Compose
+* **Production:** AWS EC2 / EKS
+
+## Key Verification Steps
+1. Start frontend on port `3000`.
+2. Start backend on port `5000`.
+3. Run health check:
+   ```bash
+   curl -i http://localhost:5000/api/health
 
 ---
 
