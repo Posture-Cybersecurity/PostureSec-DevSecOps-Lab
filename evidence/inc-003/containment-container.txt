@@ -1,0 +1,5 @@
+CONTAINER=/warroom-local-backend
+IMAGE=posturesec-warroom-local-backend
+IMAGE_ID=sha256:7a678699eda8e03cd021704494cee92e0c924de79c7714723bb8a2ba97fe86b2
+STATUS=running
+CREATED=2026-10-04T10:08:40.868225581Z
