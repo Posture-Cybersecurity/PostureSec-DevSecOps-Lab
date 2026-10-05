@@ -5,11 +5,13 @@ import { formatDistanceToNow } from 'date-fns';
 import { HiArrowLeft, HiPencil, HiTrash } from 'react-icons/hi2';
 import CommentSection from '../components/CommentSection';
 import ConfirmModal from '../components/ConfirmModal';
+import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
 
 function PostDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { user, loading: authLoading } = useAuth();
   const [post, setPost] = useState(null);
   const [loading, setLoading] = useState(true);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -41,7 +43,7 @@ function PostDetail() {
     }
   };
 
-  if (loading) {
+  if (loading || authLoading) {
     return (
       <div className="loading">
         <div className="loading-spinner" />
@@ -51,6 +53,7 @@ function PostDetail() {
 
   if (!post) return null;
 
+  const canManagePost = user && String(user.id) === String(post.owner_id);
   const timeAgo = formatDistanceToNow(new Date(post.created_at), { addSuffix: true });
   const wasEdited = post.updated_at !== post.created_at;
 
@@ -70,14 +73,16 @@ function PostDetail() {
           {wasEdited && <span style={{ color: 'var(--accent-primary)' }}>(edited)</span>}
         </div>
 
-        <div className="post-detail-actions">
-          <Link to={`/edit/${post.id}`} className="btn btn-secondary btn-sm">
-            <HiPencil size={16} /> Edit
-          </Link>
-          <button className="btn btn-danger btn-sm" onClick={() => setShowDeleteModal(true)}>
-            <HiTrash size={16} /> Delete
-          </button>
-        </div>
+        {canManagePost && (
+          <div className="post-detail-actions">
+            <Link to={`/edit/${post.id}`} className="btn btn-secondary btn-sm">
+              <HiPencil size={16} /> Edit
+            </Link>
+            <button className="btn btn-danger btn-sm" onClick={() => setShowDeleteModal(true)}>
+              <HiTrash size={16} /> Delete
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="post-detail-content">{post.content}</div>
