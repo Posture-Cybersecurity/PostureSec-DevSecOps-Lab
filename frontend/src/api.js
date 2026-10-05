@@ -24,6 +24,11 @@ export const getComments = (postId) => api.get(`/comments/post/${postId}`);
 export const createComment = (data) => api.post('/comments', data);
 export const deleteComment = (id) => api.delete(`/comments/${id}`);
 
+// Incident (War Room exercise). Absent in the plain lab — callers treat a
+// failure as "no incident" and render nothing.
+export const getIncidentStatus = () => api.get('/incident/status');
+export const getIncident = () => api.get('/incident');
+
 // Auth
 export const register = (data) => api.post('/auth/register', data);
 export const login = (data) => api.post('/auth/login', data);

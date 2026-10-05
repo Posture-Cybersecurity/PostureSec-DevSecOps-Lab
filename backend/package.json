@@ -7,7 +7,11 @@
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
     "lint": "eslint src/ --ext .js",
-    "test": "jest --runInBand --forceExit"
+    "test": "jest --runInBand --forceExit",
+    "test:remediation": "node -e \"process.env.WARROOM_REMEDIATION='1';require('child_process').spawnSync(process.platform==='win32'?'npx.cmd':'npx',['jest','tests/warroom_remediation.test.js','--runInBand','--forceExit'],{stdio:'inherit',env:process.env})\"",
+    "warroom:status": "node src/warroom/cli.js status",
+    "warroom:trigger": "node src/warroom/cli.js trigger",
+    "warroom:reset": "node src/warroom/cli.js reset"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
