@@ -66,19 +66,32 @@ router.post('/', requireAuth, async (req, res) => {
 
 // UPDATE post
 router.put('/:id', requireAuth, async (req, res) => {
-  const { title, content, author, emoji } = req.body;
-
-  if (!title || !content) {
-    return res.status(400).json({ error: 'Title and content are required' });
+  if (!req.user) {
+    return res.status(401).json({ error: 'Authentication required' });
   }
 
+  const { title, content, author, emoji } = req.body;
+
   try {
+    const postResult = await pool.query('SELECT * FROM posts WHERE id = $1', [req.params.id]);
+    if (postResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Post not found' });
+    }
+
+    if (postResult.rows[0].owner_id !== req.user.id) {
+      return res.status(403).json({ error: 'You are not allowed to update this post' });
+    }
+
+    if (!title || !content) {
+      return res.status(400).json({ error: 'Title and content are required' });
+    }
+
     const result = await pool.query(
       `UPDATE posts 
        SET title = $1, content = $2, author = $3, emoji = $4, updated_at = NOW() 
-        WHERE id = $5 AND owner_id = $6
+       WHERE id = $5 AND owner_id = $6
        RETURNING *`,
-            [title, content, author || 'Anonymous', emoji || '🛡️', req.params.id, req.user.id]
+      [title, content, author || 'Anonymous', emoji || '🛡️', req.params.id, req.user.id]
     );
 
     if (result.rows.length === 0) {
