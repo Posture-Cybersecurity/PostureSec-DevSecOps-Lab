@@ -91,8 +91,3 @@ Authentication (Identity Check): Handled by authMiddleware inside backend/middle
 Authorization (Permission Check): Handled inside route controller logic or specific role-based guard functions. It verifies if the authenticated user (req.user) possesses permission to edit/delete a given resource or perform administrative actions. Rejects unauthorized requests with 403 Forbidden.
 
 
----
-
-#### 3. Save and Verify
-1. Press `Ctrl + S` to save the file in VS Code.
-2. Preview your Markdown file by pressing `Ctrl + Shift + V` to ensure all formatting
