@@ -2,6 +2,48 @@
 
 How we work on this codebase. Read it once, properly — you acknowledge it in **ONB-010**,
 and several later tasks assume you have.
+# Local Onboarding & Security Practice – ONB-009
+
+## Overview & Objective
+This update documents local onboarding procedures, architecture highlights, and service verification steps to establish standardized engineering documentation practices and ensure all local setup changes remain fully discoverable for subsequent team members.
+
+---
+
+## Change Log & Engineering Evidence
+
+* **Updated Document:** `docs/ENGINEERING-HANDBOOK.md`
+* **Objective:** Standardize engineering onboarding documentation and maintain audit-ready evidence of environment configuration.
+* **Acceptance Criteria Met:**
+  * **Clear Documentation:** Detailed system architecture, runtime environments, and local API verification steps.
+  * **Discoverability:** Tracked via Git commit history (`docs(ONB-009)`) to ensure full visibility for incoming engineers.
+
+---
+
+## System Architecture Highlights
+
+**PostureSec** runs a 3-tier architecture composed of:
+* **Frontend:** React / Vite Dev Server (Port 3000)
+* **Backend API:** Node.js / Express (Port 5000)
+* **Database:** PostgreSQL
+
+---
+
+## Deployment Environments
+
+* **Local Development:** Vite Dev Server + Express API
+* **Staging Cluster:** Containerized environment (Docker Compose)
+* **Production:** Cloud Infrastructure (AWS EC2 / EKS)
+
+---
+
+## Key Verification Steps
+
+1. Launch the local frontend server on port `3000`.
+2. Launch the local backend API server on port `5000`.
+3. Verify backend connectivity by executing a health check endpoint test:
+
+```bash
+curl -i http://localhost:5000/api/health
 
 ---
 
