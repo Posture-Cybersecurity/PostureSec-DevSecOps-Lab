@@ -31,6 +31,6 @@ services:
   backend:
     build:
       # context stays ./backend (from the base file); only the Dockerfile changes.
-      dockerfile: Dockerfile.inc003-vulnerable
+      dockerfile: Dockerfile.inc003-remediated
     environment:
       WAR_ROOM_INCIDENT: "INC-003"
