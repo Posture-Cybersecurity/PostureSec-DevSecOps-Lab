@@ -1,0 +1,111 @@
+# DSO-W4 — WAR ROOM: the unreachable database (Sprint 4, Compose & Service Networking)
+# =============================================================================
+# This is the INCIDENT starting point. It is the Sprint 4 reference stack with
+# ONE change that was meant to be a harmless security tidy-up: the database was
+# moved onto its own network to "isolate the data tier." The stack still builds,
+# `db` still becomes healthy, and nothing in this file looks obviously wrong —
+# yet the backend can no longer reach PostgreSQL.
+#
+# Your job (War Room): bring this up, observe the failure, find the root cause,
+# and fix it. The symptom and the evidence are real; the cause is in this file.
+# Do not read the incident note until you have formed a theory from the evidence.
+#
+#     frontend  --(http://backend:5000)-->  backend  --(db:5432)-->  db
+#
+# Bring it up with:  docker compose -f warroom/dso-w4/docker-compose.broken.yml up -d --build db backend
+# =============================================================================
+
+services:
+  # ---- PostgreSQL database ----
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: posturesec_user
+      POSTGRES_PASSWORD: posturesec_pass_2026
+      POSTGRES_DB: posturesec_db
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # The "harmless" edit: the data tier was given its own isolated network.
+    networks:
+      - dbnet
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U posturesec_user -d posturesec_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    tmpfs:
+      - /run
+
+  # ---- Backend API (Node.js / Express) ----
+  backend:
+    build:
+      context: ../../backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      PORT: "5000"
+      DB_USER: posturesec_user
+      DB_PASSWORD: posturesec_pass_2026
+      # Looks correct — the service IS named `db`. (It is reachable only on the
+      # network `db` is attached to, though.)
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: posturesec_db
+    expose:
+      - "5000"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - posturenet
+    healthcheck:
+      test:
+        - "CMD"
+        - "node"
+        - "-e"
+        - "require('http').get('http://127.0.0.1:5000/api/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+
+  # ---- Frontend (Nginx serving React, proxying /api to the backend) ----
+  frontend:
+    build:
+      context: ../../frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "80:8080"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - posturenet
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+
+# Two networks now. The app tier and the data tier no longer share one, so
+# Docker's embedded DNS cannot resolve `db` from `backend`.
+networks:
+  posturenet:
+    driver: bridge
+  dbnet:
+    driver: bridge
+
+volumes:
+  pgdata:
+    driver: local
