@@ -2,15 +2,33 @@ const express = require('express');
 const router = express.Router();
 const { pool } = require('../db');
 const { requireAuth } = require('../middleware/authenticate');
+const { rateLimit } = require('../middleware/rateLimit');
 
-// GET all posts (newest first)
-router.get('/', async (req, res) => {
+// One page. A caller cannot raise this, and a single read cannot return the table.
+const MAX_PAGE = 100;
+// Under the 100kb JSON cap, and under the 40kb bodies that filled the list.
+const MAX_CONTENT_CHARS = 20000;
+
+function contentTooLarge(content) {
+  return typeof content === 'string' && content.length > MAX_CONTENT_CHARS;
+}
+
+// GET a bounded page of posts (newest first). Public, same as before.
+router.get('/', rateLimit, async (req, res) => {
+  const requested = Number.parseInt(req.query.limit, 10);
+  const limit = Number.isFinite(requested) && requested > 0
+    ? Math.min(requested, MAX_PAGE)
+    : MAX_PAGE;
+
   try {
     const result = await pool.query(
-      `SELECT p.*,
-        (SELECT COUNT(*) FROM comments c WHERE c.id = p.id) as comment_count
+      `SELECT p.id, p.title, LEFT(p.content, 500) AS content, p.author, p.emoji,
+              p.owner_id, p.created_at, p.updated_at,
+              (SELECT COUNT(*)::int FROM comments c WHERE c.post_id = p.id) AS comment_count
        FROM posts p
-       ORDER BY p.created_at DESC`
+       ORDER BY p.created_at DESC
+       LIMIT $1`,
+      [limit]
     );
     res.json(result.rows);
   } catch (err) {
@@ -49,6 +67,9 @@ router.post('/', requireAuth, async (req, res) => {
   if (!title || !content) {
     return res.status(400).json({ error: 'Title and content are required' });
   }
+  if (contentTooLarge(content)) {
+    return res.status(400).json({ error: 'Content is too large' });
+  }
 
   try {
     const result = await pool.query(
@@ -70,6 +91,9 @@ router.put('/:id', requireAuth, async (req, res) => {
 
   if (!title || !content) {
     return res.status(400).json({ error: 'Title and content are required' });
+  }
+  if (contentTooLarge(content)) {
+    return res.status(400).json({ error: 'Content is too large' });
   }
 
   try {

@@ -110,3 +110,4 @@ echo "  pm2 logs            - View backend logs"
 echo "  pm2 restart all     - Restart backend"
 echo "  sudo systemctl restart nginx - Restart Nginx"
 echo ""
+
