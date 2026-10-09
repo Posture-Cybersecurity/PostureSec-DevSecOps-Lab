@@ -1,0 +1,27 @@
+# DSO-305 — DELIBERATELY VULNERABLE training image. DO NOT ship or copy this
+# pattern into a real service. It exists only to demonstrate, with a SYNTHETIC
+# secret, that a value written into one image layer stays recoverable from that
+# layer even after a LATER layer deletes the file.
+#
+# The "secret" below is fake and generated inside the build — no real credential
+# and no secret file from the build context is ever used. See README.md.
+FROM alpine:3.23
+
+# --- Layer A: the mistake -------------------------------------------------
+# A credential lands in the image filesystem. In the real world this is usually
+# a COPY of a .env / id_rsa / service-account.json; we synthesize it so nothing
+# real is ever baked.
+RUN echo "SYNTHETIC-DSO305-SECRET=dso305_fake_token_do_not_use_7f3a9c2b1e" \
+      > /root/app.secret
+
+# --- Some unrelated layers in between -------------------------------------
+RUN echo "compiling the widget" > /root/build.log
+RUN echo "running the widget"  >> /root/build.log
+
+# --- Layer B: the "fix" that isn't ----------------------------------------
+# Deleting the file in a later layer removes it from the FINAL filesystem, so a
+# casual `docker run ... cat /root/app.secret` shows nothing — but Layer A still
+# carries the bytes, and anyone with the image can unpack that layer and read it.
+RUN rm -f /root/app.secret
+
+CMD ["sh", "-c", "echo 'DSO-305 vulnerable demo image — see security/dso-305/README.md'"]
