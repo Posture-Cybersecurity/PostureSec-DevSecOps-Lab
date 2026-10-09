@@ -76,9 +76,9 @@ router.put('/:id', requireAuth, async (req, res) => {
     const result = await pool.query(
       `UPDATE posts 
        SET title = $1, content = $2, author = $3, emoji = $4, updated_at = NOW() 
-       WHERE id = $5 
+       WHERE id = $5 and owner_id = $6
        RETURNING *`,
-      [title, content, author || 'Anonymous', emoji || '🛡️', req.params.id]
+      [title, content, author || 'Anonymous', emoji || '🛡️', req.params.id, req.user.id]
     );
 
     if (result.rows.length === 0) {
