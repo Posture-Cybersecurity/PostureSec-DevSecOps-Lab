@@ -25,7 +25,6 @@ RUN apk --no-cache add dumb-init=1.2.5-r3
 WORKDIR /app
 COPY --from=build /app/node_modules ./node_modules
 COPY src/ ./src/
-COPY training-canary.env ./training-canary.env
 RUN chown -R appuser:appgroup /app
 USER appuser
 EXPOSE 5000
