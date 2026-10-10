@@ -224,3 +224,4 @@ npx jest -t "valid credentials issue a session cookie"
 ---
 
 Built with 💚 by the Posture Cybersecurity team. 🛡️
+Verified backend and frontend run locally.
