@@ -195,6 +195,25 @@ npx jest tests/auth.test.js
 npx jest -t "valid credentials issue a session cookie"
 ```
 
+## End-to-end Docker smoke test
+
+With Bash, Node.js, curl, Docker Engine and Docker Compose v2 installed, run this
+from the repository root:
+
+```bash
+bash scripts/smoke.sh
+```
+
+The script builds and starts the full Compose stack, checks the UI and API,
+registers a uniquely named synthetic `@smoke.local` user, creates a post, and
+checks that the post remains readable after `docker compose restart db`. It
+tears down containers on exit with `docker compose down`, which preserves the
+database volume. Set `SMOKE_KEEP=1` to leave the stack running, or set
+`POSTURESEC_BASE_URL` if the UI is reachable at an address other than
+`http://127.0.0.1`. Each run leaves its uniquely named test user and post in the
+lab database. Do not add `-v` to the `docker compose down` command: that flag
+removes the database volume and its data.
+
 ---
 
 ## 📡 API Endpoints
