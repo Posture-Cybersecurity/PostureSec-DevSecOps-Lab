@@ -1,0 +1,17 @@
+****No real self-healing****
+•	Compose Limitation: No real self-healing. 
+•	PostureSec Scenario: Restarting the db container drops backend connections and fails user requests. 
+•	Kubernetes Mechanism: Readiness/liveness probes + ReplicaSet replacement. 
+•	Caveat: Only works if probes are accurately configured to detect failures. 
+•  
+****Limited scaling****
+•	Compose Limitation: Manual scaling locked to a single host. 
+•	PostureSec Scenario: High traffic spikes on /api/auth/login overload host resources. 
+•	Kubernetes Mechanism: Deployment + Service + Horizontal Pod Autoscaler (HPA) across nodes. 
+•	Caveat: Requires proper resource requests and limits to be defined. 
+• 
+****Single-host dependency****
+•	Compose Limitation: Host failure takes down the entire stack and volume. 
+•	PostureSec Scenario: The underlying Docker host dies, taking down the app and pgdata. 
+•	Kubernetes Mechanism: Multi-node scheduling with StatefulSets and PVCs. 
+•	Caveat: Stateful database failover still requires careful storage configuration. 

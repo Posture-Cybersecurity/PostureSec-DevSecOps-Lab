@@ -1,0 +1,11 @@
+# ==============================================================
+# PostureSec — Namespace
+# Apply this first before secrets and app manifests.
+# ==============================================================
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: posturesec
+  labels:
+    app.kubernetes.io/part-of: posturesec
