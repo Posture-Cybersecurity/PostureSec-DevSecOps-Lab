@@ -57,7 +57,7 @@ services:
     container_name: posturesec-frontend
     restart: unless-stopped
     ports:
-      - "80:8080"
+      - "80:80"
     depends_on:
       - backend
     security_opt:

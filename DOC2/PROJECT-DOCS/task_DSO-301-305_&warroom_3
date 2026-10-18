@@ -1,0 +1,795 @@
+# Sprint 3 — Docker and Secure Images
+  
+**Squad:** Delta Squad  
+**Project:** PostureSec DevSecOps Lab  
+**Tasks:** DSO-301 to DSO-305  
+**Environment:** Windows, Ubuntu WSL, and Docker Desktop  
+
+## 1. Overview
+
+This document records my Sprint 3 work on Docker fundamentals, container image publishing, multi-stage builds, and image security.
+
+I worked with the PostureSec backend and frontend, reviewed their build configurations, investigated container behaviour, and completed the INC-003 compromised-image simulation.
+
+The task explanations, relevant commands, and screenshot spaces are included below. Where a measured value or final output is not present in this record, I have left an explicit space for that evidence.
+
+## 2. Task Overview
+
+| Task | Focus |
+|---|---|
+| DSO-301 | Docker fundamentals and environment verification |
+| DSO-302 | Backend image build, tagging, and GHCR publishing workflow |
+| DSO-303 | Backend multi-stage build |
+| DSO-304 | Frontend multi-stage build |
+| DSO-305 | Secrets in image layers, runtime injection, and Hadolint |
+
+## 3. DSO-301 — Docker Fundamentals
+
+### Objective
+
+Verify the Docker environment and understand the relationship between the Docker client, daemon, images, and containers.
+
+### Work Completed
+
+I worked with Docker from Ubuntu WSL using Docker Desktop.
+
+The introductory verification commands were:
+
+```bash
+docker --version
+docker info
+docker run hello-world
+```
+
+These checks establish whether the Docker CLI is available, whether it can communicate with the daemon, and whether Docker can run a container.
+
+### Concepts Learned
+
+**Docker client:** The interface through which I submit commands such as `docker build` and `docker run`.
+
+**Docker daemon:** The service that manages Docker images, containers, networks, and volumes.
+
+**Image:** A packaged application artifact containing filesystem layers and configuration used to create containers.
+
+**Container:** An instance created from an image, with its own writable filesystem layer.
+
+An image can be used to create multiple containers. Stopping a container does not delete its source image.
+
+### Screenshot: Docker Environment
+
+![alt text](image.png)
+#### Screenshot: Hello World
+
+### Learning Outcome
+
+I developed a clearer understanding of how Docker commands move from the client to the daemon and how images differ from containers.
+
+## 4. DSO-302 — Backend Image Build and GHCR Workflow
+
+### Objective
+
+Build a backend image locally and work through the tagging, authentication, naming, and permissions required for publishing to GitHub Container Registry.
+
+### Work Completed
+
+I built a local backend image and worked through the GHCR publishing process.
+
+The workflow involved:
+
+1. Building the backend image.
+2. Assigning a registry-qualified image reference.
+3. Authenticating to GHCR.
+4. Attempting to push the image.
+5. Investigating publishing errors and workflow configuration.
+
+### Screenshot: Local Image Build
+
+![alt text](image-1.png)
+
+### Screenshot: Image Tag
+![alt text](image-2.png)
+![alt text](image-10.png)
+![alt text](image-11.png)
+![alt text](image-12.png)
+![alt text](image-13.png)
+![alt text](image-14.png)
+![alt text](image-15.png)
+![alt text](image-16.png)
+![alt text](image-17.png)
+### Troubleshooting
+
+An earlier push attempt returned a package-permissions error.
+
+I also reviewed the CI workflow’s handling of image paths. The workflow converts the GitHub repository path to lowercase before constructing the GHCR references:
+
+```bash
+REPO=$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')
+```
+
+The workflow uses the lowercase path in both publishing and deployment-manifest references.
+
+A permissions error and an invalid image reference are different failures. The actual command output or CI log must support the diagnosis.
+
+### Screenshot: Initial Failure
+![alt text](image-3.png)
+
+
+### Screenshot: Relevant Fix
+![alt text](image-4.png)
+
+### Screenshot: Final Publishing Result
+![alt text](image-5.png)
+
+
+### Evidence Note
+
+The record available for this document includes the earlier denied push and the workflow configuration. Attach the final publication evidence to substantiate successful registry publishing.
+
+### Learning Outcome
+
+I learned to investigate authentication, package permissions, and image naming separately, rather than treating every publishing failure as the same issue.
+
+## 5. DSO-303 — Multi-stage Build: Backend
+
+### Objectivea
+
+Split the backend build and runtime stages using `node:20-alpine`, run as a non-root user, and exclude development dependencies from the final image.
+
+### Acceptance Criteria
+
+- Final image runs as a non-root user.
+- Runtime content is minimal and within the specified size budget.
+- `/api/health` responds from the container.
+
+### Implementation
+
+The backend Dockerfile uses a build stage to install production dependencies:
+
+
+The dependency installation selects production dependencies. The final stage receives only the selected dependencies and source files.
+
+The `USER appuser` instruction configures a non-root runtime account.
+
+### Build Verification
+
+The backend image built successfully. Image history showed the expected dependency and source-copy instructions.
+
+Filesystem inspection showed:
+
+```text
+/app/node_modules
+/app/src
+```
+
+### Screenshot: Successful Build
+![alt text](image-6.png)
+
+
+### Runtime User Verification
+
+The Dockerfile specifies `appuser`. Record the actual runtime identity with:
+
+```bash
+docker compose exec backend id
+```
+
+### Screenshot: Non-root User
+![alt text](image-7.png)
+**Add screenshot showing the backend runtime UID and username.**
+
+### Image Size
+![alt text](image-8.png)
+
+**Recorded image size:** Add measured size.  
+**Specified size budget:** Add the required budget.  
+**Comparison:** State whether the image is within budget.
+
+### Screenshot: Backend Image Size
+
+**Add screenshot showing the actual backend image reference and size.**
+
+<!--
+![Backend image size](screenshots/dso-303-image-size.png)
+-->
+
+### Health Verification
+
+The deployed backend returned HTTP 200 through the NGINX proxy:
+
+```json
+{"status":"ok","message":"PostureSec API is operational 🛡️"}
+```
+
+For direct verification inside the normal backend container:
+
+```bash
+docker compose exec backend node -e 'fetch("http://127.0.0.1:5000/api/health").then(async r=>{console.log(r.status,await r.text());if(!r.ok)process.exit(1)}).catch(e=>{console.error(e);process.exit(1)})'
+```
+
+### Screenshot: Backend Health
+![alt text](image-9.png)
+
+### Learning Outcome
+
+Multi-stage builds provide control over what reaches the runtime image. The security and size benefits depend on the dependencies and files selected for the final stage.
+
+## 6. DSO-304 — Multi-stage Build: Frontend
+
+### Objective
+
+Build the frontend using Vite and serve the generated static assets through a minimal NGINX runtime on port 80.
+
+### Acceptance Criteria
+
+- Vite generates the frontend assets.
+- NGINX serves the static assets from a slim final stage.
+- The final image size is recorded.
+
+### Implementation
+
+The frontend uses a Node.js build stage to install dependencies and compileu the application:
+
+```bash
+npm run build
+```
+
+The production stage uses NGINX and copies the generated output:
+
+```dockerfile
+COPY --from=build /app/dist /usr/share/nginx/html
+```
+
+This separates the frontend build environment from the runtime used to serve the application
+
+### Screenshot: Frontend Build
+![alt text](image-20.png)
+![alt text](image-21.png)
+![alt text](image-22.png)
+![alt text](image-23.png)
+![alt text](image-24.png)
+
+### NGINX Port Configuration
+
+The required container listening port is 80.
+
+For the War Room application on host port 8080, the corresponding mapping is:
+
+```yaml
+ports:
+  - "8080:80"
+```
+
+The published container port must match the actual NGINX listening port.
+
+### Application Verification
+
+An HTTP request returned HTTP 200 and the application HTML, including references to generated JavaScript and CSS files.
+
+A runtime user check returned:
+
+```text
+nginx
+```
+
+The entry-page response established that NGINX served the application HTML. A direct request to a generated asset provides separate evidence that the asset is served correctly.
+
+
+### Troubleshooting
+
+During War Room startup, a request initially failed with a connection reset. After correcting the frontend port configuration, the simulation became accessible.
+
+This demonstrated why container status alone does not prove that a service is reachable through its published port.
+
+### Learning Outcome
+
+Node.js is required to build the frontend, while NGINX can serve the compiled output. Separating these stages reduces unnecessary runtime content.
+
+## 7. DSO-305 — No Secrets in Layers and Hadolint Clean
+
+### Objective
+
+Demonstrate that credentials baked into images can remain recoverable, exclude secrets from builds, supply required credentials at runtime, and lint both Dockerfiles.
+
+The task wording mentions “unrecoverable,” but the practical acceptance criterion demonstrates recoverability from a bad image’s layers.
+
+### Acceptance Criteria
+
+- Recover a synthetic credential from a bad image’s layers.
+- Keep required application secrets in runtime configuration.
+- Achieve clean Hadolint results or justify intentional ignores.
+
+### Vulnerable Image
+
+The vulnerable backend Dockerfile included:
+
+```dockerfile
+COPY training-canary.env ./training-canary.env
+```
+
+This copied the synthetic credential into the production image.
+
+### RED/TRAP/GREEN Verification
+
+I ran the supplied verification harness:
+
+```bash
+bash warroom/inc003/verify.sh --keep
+```
+
+The results were:
+
+| Image | Credential in final filesystem | Credential recoverable from layers |
+|---|---|---|
+| Vulnerable | Yes | Yes |
+| Delete-after-copy trap | No | Yes |
+| Remediated | No | No |
+
+The harness reported PASS.
+
+This demonstrated that removing a file in a later layer does not erase its contents from an earlier layer.
+
+### Remediation
+
+The corrected build copied only the required application content:
+
+```dockerfile
+COPY --from=build /app/node_modules ./node_modules
+COPY src/ ./src/
+```
+
+The synthetic credential was excluded.
+
+Required application credentials should be supplied through runtime configuration or an appropriate mounted-secret mechanism. The training canary was not required for normal operation and was not injected into the corrected container.
+
+
+### Screenshot: Runtime Secret Configuration
+![alt text](image-26.png)
+
+
+### Deployed Replacement Verification
+
+A separate check inspected the exact deployed replacement image.
+
+The result was:
+
+```text
+PASS: full synthetic credential absent from all 10 image layers
+```
+
+This provided evidence for the deployed artifact, separately from the harness builds.
+
+### Hadolint
+
+Both Dockerfiles are included in the linting scope.
+
+Backend command:
+
+```bash
+docker run --rm -i hadolint/hadolint < backend/Dockerfile
+echo "Hadolint exit code: $?"
+```
+
+Frontend command:
+
+```bash
+docker run --rm -i hadolint/hadolint < frontend/Dockerfile
+echo "Hadolint exit code: $?"
+```
+
+An earlier invocation failed because of shell-command formatting. That execution failure is not a lint result.
+
+### Screenshot: Backend and frontend Hadolint
+
+![alt text](image-27.png)
+
+![alt text](image-28.png)
+
+
+### Learning Outcome
+
+Deleting a credential from the final filesystem is insufficient when an earlier layer contains it. A corrected build must exclude the credential, and verification must inspect the resulting artifact.
+
+Hadolint complements this process but does not replace secret detection or layer inspection.
+
+## 8. War Room Application
+
+I applied the sprint’s image-security concepts during INC-003.
+
+The investigation covered detection, image identification, credential-presence checks, containment, build remediation, replacement-image verification, and application recovery.
+
+The separate INC-003 report below contains the detailed evidence and investigation limitations.
+
+## 9. Reflection
+
+This sprint helped me connect Docker commands with the behaviour and security of the images I build.
+
+The main lesson was that a working application can still run from an insecure image. I also learned to record exact image identities, distinguish failed checks from completed scans, and support conclusions with command output.
+
+---
+
+# INC-003 — War Room Incident Report
+**Project:** PostureSec DevSecOps Lab  
+**Incident:** INC-003 — Secret/Image Compromised  
+**Date:** 17 October 2026  
+**Outcome:** Corrected backend deployed; synthetic credential absent from the replacement filesystem and all 10 checked image layers; API health restored.
+
+## 1. Incident Summary
+
+Security monitoring detected credential material associated with the backend container image.
+
+The application continued responding while the incident was active. I investigated the running container and build configuration, contained the affected backend, deployed a corrected image, and verified its filesystem, layers, and application health.
+
+The exercise used a synthetic credential that authenticated to nothing.
+
+## 2. Environment
+
+| Component | Details |
+|---|---|
+| Development environment | Ubuntu WSL with Docker Desktop |
+| Frontend | NGINX |
+| Backend | Node.js |
+| Database | PostgreSQL |
+| Application address | http://localhost:8080 |
+| Affected container | `warroom-local-backend` |
+| Exercise configuration | Base War Room Compose file and INC-003 overlay |
+
+## 3. Detection
+
+The application displayed:
+
+```text
+INC-003 · ACTIVE
+
+Security monitoring detected credential material in the container image currently in use.
+```
+
+The incident brief required investigation of the image filesystem, build configuration, and layers.
+
+### Screenshot: Active Incident
+![alt text](image-29.png)
+
+<!--
+![INC-003 active incident](screenshots/inc003-01-active-incident.png)
+-->
+
+## 4. Initial Application Health
+
+I checked:
+
+```bash
+curl -i http://localhost:8080/api/health
+```
+
+The endpoint returned HTTP 200:
+
+```json
+{"status":"ok","message":"PostureSec API is operational 🛡️"}
+```
+
+This established availability, not image security.
+
+### Screenshot: Initial Health Response
+![alt text](image-30.png)
+
+<!--
+![Application health before remediation](screenshots/inc003-02-initial-health.png)
+-->
+
+## 5. Investigation
+
+### 5.1 Affected Container and Image
+
+I recorded the backend image reference and identity:
+
+```bash
+docker inspect warroom-local-backend --format 'Image reference: {{.Config.Image}} | Image ID: {{.Image}}'
+```
+
+Image reference:
+
+```text
+posturesec-warroom-local-backend
+```
+
+Original image identity reported by the container:
+
+```text
+sha256:b057adc463262d99fcfaaf806a0e0dca503921aa8444f716b769e692c78c8e5a
+```
+
+### Screenshot: Affected Image Identity
+![alt text](image-31.png)
+
+<!--
+![Affected backend image identity](screenshots/inc003-03-affected-image.png)
+-->
+
+### 5.2 Credential Presence
+
+The file check confirmed:
+
+```text
+/app/training-canary.env
+```
+
+The full synthetic credential check returned:
+
+```text
+FOUND: synthetic credential in running container filesystem
+```
+
+### Screenshot: Credential Presence
+![alt text](image-32.png)
+
+<!--
+![Synthetic credential detected](screenshots/inc003-04-credential-presence.png)
+-->
+
+### 5.3 Build Configuration
+
+The vulnerable Dockerfile included this instruction in its production stage:
+
+```dockerfile
+COPY training-canary.env ./training-canary.env
+```
+
+The `.dockerignore` excluded `.env`, but that filename did not match `training-canary.env`.
+
+### Screenshot: Build Root Cause
+![alt text](image-33.png)
+<!--
+![Credential exposure root cause](screenshots/inc003-05-root-cause.png)
+-->
+
+### 5.4 Image Identity Discrepancy
+
+The history initially inspected through the mutable tag belonged to a different image identity from the running container’s recorded image.
+
+I attempted to inspect the original identity directly. Docker returned:
+
+```text
+No such image: sha256:b057adc463262d99fcfaaf806a0e0dca503921aa8444f716b769e692c78c8e5a
+```
+
+The original image was unavailable locally for direct history and layer examination.
+
+I also ran:
+
+```bash
+docker diff warroom-local-backend
+```
+
+Docker reported no changes in the container’s writable filesystem.
+
+Combined with the credential-presence result, this supported that the file was present when the container was created. It did not replace a direct scan of the original image layers.
+
+### Screenshot: Investigation Limitation
+
+**Add screenshot showing the missing-image error and empty `docker diff` output.**
+
+<!--
+![Original image investigation limitation](screenshots/inc003-06-image-limitation.png)
+-->
+
+## 6. Root Cause
+
+The selected vulnerable Dockerfile explicitly copied the synthetic credential file into the production image.
+
+The file was available in the build context, and the `.dockerignore` entry for `.env` did not exclude it.
+
+The issue originated in the image build. Application health checks and container restarts could not correct that build defect.
+
+## 7. Containment
+
+After collecting the available evidence, I stopped the backend:
+
+```bash
+docker stop warroom-local-backend
+```
+
+I confirmed its status:
+
+```bash
+docker ps -a --filter name=warroom-local-backend
+```
+
+The container reported:
+
+```text
+Exited (143)
+```
+
+This was consistent with termination following `docker stop`.
+
+The action interrupted the simulation API and preserved the container until replacement.
+
+No credential rotation was necessary for the nonfunctional training canary. A real exposed credential would require revocation or rotation as well as image remediation.
+
+### Screenshot: Containment
+![alt text](image-34.png)
+
+<!--
+![Affected backend contained](screenshots/inc003-07-containment.png)
+-->
+
+## 8. Remediation
+
+The corrected Dockerfile omitted the training credential and copied only the required application content:
+
+```dockerfile
+COPY --from=build /app/node_modules ./node_modules
+COPY src/ ./src/
+```
+
+I created an additional override, `docker-compose.inc003-remediated.yml`:
+
+```yaml
+services:
+  backend:
+    build:
+      dockerfile: Dockerfile.inc003-remediated
+```
+
+I rebuilt and replaced only the backend:
+
+```bash
+WARROOM_SQUAD=local docker compose -f docker-compose.warroom.yml -f docker-compose.inc003.yml -f docker-compose.inc003-remediated.yml up -d --build --no-deps --force-recreate backend
+```
+
+This selected the corrected Dockerfile while preserving the database.
+
+### Screenshot: Remediation Configuration
+![alt text](image-35.png)
+
+<!--
+![Remediation build configuration](screenshots/inc003-08-remediation-config.png)
+-->
+
+### Screenshot: Replacement Deployment
+![alt text](image-36.png)
+
+<!--
+![Corrected backend deployed](screenshots/inc003-09-replacement-deployment.png)
+-->
+
+## 9. Verification
+
+### 9.1 Replacement Image Identity
+
+The replacement container reported:
+
+```text
+sha256:d2143e5457140c205b76b90df83d9eb2e6ec9a46d6cb21b6d0cb65c0836c2410
+```
+
+This differed from the original affected image identity.
+
+These are identities reported by local Docker. No registry publication or registry digest verification was performed for the simulation images.
+
+### 9.2 Final Filesystem
+
+The replacement check returned:
+
+```text
+PASS: canary file absent
+```
+
+### 9.3 Image History
+
+The replacement image history showed the expected scoped copies and no instruction copying `training-canary.env`.
+
+Older timestamps reflected reused build layers. The `<missing>` entries represented historical layers without separately available image IDs.
+
+History supported the expected build configuration but was not treated as sufficient proof of clean layer contents.
+
+### 9.4 Exact Deployed-image Layer Scan
+
+I exported the exact deployed replacement image and scanned the regular-file contents of every exported layer for the full synthetic credential.
+
+The scan handled compressed layer archives and stopped if export or parsing failed.
+
+The result was:
+
+```text
+Checking deployed image: sha256:d2143e5457140c205b76b90df83d9eb2e6ec9a46d6cb21b6d0cb65c0836c2410
+PASS: full synthetic credential absent from all 10 image layers
+```
+
+This established absence of the specific training credential from the checked layer contents. It did not certify that the image contained no other secrets or vulnerabilities.
+
+### 9.5 Application Recovery
+
+I restarted the frontend and checked the API:
+
+```bash
+docker restart warroom-local-frontend
+curl -i http://localhost:8080/api/health
+```
+
+The response was HTTP 200:
+
+```json
+{"status":"ok","message":"PostureSec API is operational 🛡️"}
+```
+
+## 10. Supporting RED/TRAP/GREEN Evidence
+
+Separately, I ran:
+
+```bash
+bash warroom/inc003/verify.sh --keep
+```
+
+The harness produced:
+
+| Training image | Final filesystem contains credential | Layers contain credential |
+|---|---|---|
+| Vulnerable | Yes | Yes |
+| Delete-after-copy trap | No | Yes |
+| Remediated | No | No |
+
+The final result was PASS.
+
+This demonstrated why deleting a credential in a later layer is insufficient.
+
+These were separate training builds. The 10-layer scan provided direct evidence for the deployed replacement image.
+
+
+## 11. Answers to the Incident Questions
+
+### What triggered the alert?
+
+The incident detector reported credential material associated with the backend image. Inspection confirmed the synthetic credential file in the running backend.
+
+### How did the credential enter the image?
+
+The vulnerable Dockerfile explicitly copied it into the production stage.
+
+### Was it present in the final filesystem?
+
+Yes. The original running container contained `/app/training-canary.env`, and the full synthetic credential check succeeded.
+
+### Was it recoverable from earlier layers?
+
+The separate vulnerable and delete-after-copy training builds demonstrated recoverability. The original deployed image was unavailable for a direct layer scan, so that limitation is retained.
+
+### How was the exposure contained?
+
+The affected backend was stopped before replacement.
+
+### How was the build remediated?
+
+A corrected Dockerfile excluded the credential file and copied only the required application content.
+
+### How was recovery proven?
+
+The replacement had a different image identity, the canary file was absent, the full synthetic credential was absent from all 10 checked layers, and the API returned HTTP 200.
+
+## 12. Prevention
+
+- Keep credentials out of image build contexts wherever possible.
+- Use narrowly scoped `COPY` instructions.
+- Maintain appropriate `.dockerignore` rules.
+- Supply required secrets through runtime configuration.
+- Add secret detection to the build process.
+- Record deployed image identities before investigating mutable tags.
+- Preserve relevant image evidence before rebuilds or cleanup.
+- Verify both application health and artifact security.
+
+Subsequent startup commands must include the remediation override. The original INC-003 helper startup path still selects the vulnerable Dockerfile.
+
+## 13. Evidence Limitations
+
+The original deployed image was unavailable for direct layer inspection.
+
+The report therefore distinguishes between evidence from the original running container, the vulnerable build configuration, separate harness builds, and the deployed replacement.
+
+The specific reason the original image became unavailable was not established.
+
+## 14. Final Outcome and Reflection
+
+The affected backend was contained and replaced.
+
+The corrected deployment had a different image identity, no canary file in its final filesystem, no full synthetic credential in its 10 checked layers, and a successful API health response.
+
+My main lesson was that availability and security require different evidence. A responding application does not establish that its image is safe.

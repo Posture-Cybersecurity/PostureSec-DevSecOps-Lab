@@ -18,3 +18,8 @@ k8s/ghcr-secret.yaml
 # OS
 .DS_Store
 Thumbs.db
+
+# Generated DSO-305 image exports
+/secret-demo/
+/secret-demo.tar
+/security/dso-305/blobs

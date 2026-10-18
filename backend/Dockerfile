@@ -7,25 +7,21 @@ RUN npm ci --only=production && npm cache clean --force
 # ---- Production stage ----
 FROM node:20-alpine AS production
 
-# Security: run as non-root user
+# Create a non-root runtime user
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 
-# Security: remove unnecessary packages
+# Install init process for signal handling
 RUN apk --no-cache add dumb-init=1.2.5-r3
 
 WORKDIR /app
 
-# Copy only production dependencies from build stage
-COPY --from=build /app/node_modules ./node_modules
-COPY src/ ./src/
-
-# Security: own files by non-root user
-RUN chown -R appuser:appgroup /app
+# Copy runtime files with ownership set during copying
+COPY --from=build --chown=appuser:appgroup /app/node_modules ./node_modules
+COPY --chown=appuser:appgroup src/ ./src/
 
 USER appuser
 
 EXPOSE 5000
 
-# Security: use dumb-init for proper signal handling (PID 1 problem)
 ENTRYPOINT ["dumb-init", "--"]
 CMD ["node", "src/index.js"]
