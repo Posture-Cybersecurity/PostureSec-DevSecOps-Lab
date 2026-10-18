@@ -1,0 +1,4 @@
+services:
+  backend:
+    build:
+      dockerfile: Dockerfile.inc003-remediated
