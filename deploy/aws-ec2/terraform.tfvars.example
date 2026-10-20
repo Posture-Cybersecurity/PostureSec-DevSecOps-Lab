@@ -1,0 +1,9 @@
+# Copy to terraform.tfvars (git-ignored). No secrets belong here: the database
+# password is generated on the instance at first boot.
+owner              = "REPLACE-with-your-github-username" # lowercase
+aws_region         = "us-east-1"
+instance_type      = "t3.small"
+http_ingress_cidrs = ["REPLACE.WITH.APPROVED.IP/32"]     # who may open the app
+# ssh_ingress_cidrs = ["REPLACE.WITH.OPERATOR.IP/32"]    # optional; needs key_name
+# key_name          = "REPLACE-existing-key-pair"
+# allowed_account_id: pass as TF_VAR_allowed_account_id, not in this file
