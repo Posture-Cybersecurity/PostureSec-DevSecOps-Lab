@@ -30,6 +30,8 @@ services:
       POSTGRES_USER: posturesec_user
       POSTGRES_PASSWORD: posturesec_pass_2026
       POSTGRES_DB: posturesec_db
+    expose:
+      - "5432"
     # Deliberately NOT published to the host. The database is an internal tier;
     # only `backend` talks to it, by the service name `db` on posturenet. If you
     # ever need host access for debugging, add a `ports:` mapping yourself — the
