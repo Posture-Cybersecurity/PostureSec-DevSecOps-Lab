@@ -122,6 +122,14 @@ run "user_data_deploys_the_pinned_commit_with_no_secret" {
     condition     = strcontains(base64decode(regex("COMPOSE_OVERRIDE_B64='([^']+)'", aws_instance.app.user_data)[0]), "ports: !reset []")
     error_message = "The shipped Compose override must unpublish PostgreSQL."
   }
+  # 2026-10-20 incident: a Windows checkout gave CRLF and bash died at line 15.
+  assert {
+    condition = (
+      !strcontains(aws_instance.app.user_data, "\r") &&
+      !strcontains(base64decode(regex("COMPOSE_OVERRIDE_B64='([^']+)'", aws_instance.app.user_data)[0]), "\r")
+    )
+    error_message = "User data and the Compose override must reach the instance with LF line endings, even from a CRLF checkout."
+  }
   assert {
     condition     = aws_instance.app.user_data_replace_on_change == true
     error_message = "Changing the commit or bootstrap replaces the instance instead of drifting."

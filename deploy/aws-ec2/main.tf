@@ -44,12 +44,14 @@ locals {
 
   # Header + static script: user_data.sh stays plain bash (no template
   # escaping). Values are validated in variables.tf, so quoting is safe.
+  # CRs are stripped: a Windows checkout (core.autocrlf=true) gives CRLF files,
+  # and bash on the instance then dies at `set -euo pipefail\r`.
   user_data = join("\n", [
     "#!/bin/bash",
     "REPO_URL='${var.app_repo_url}'",
     "GIT_REF='${var.app_git_ref}'",
-    "COMPOSE_OVERRIDE_B64='${base64encode(file("${path.module}/compose.ec2.yaml"))}'",
-    file("${path.module}/user_data.sh"),
+    "COMPOSE_OVERRIDE_B64='${base64encode(replace(file("${path.module}/compose.ec2.yaml"), "\r", ""))}'",
+    replace(file("${path.module}/user_data.sh"), "\r", ""),
   ])
 }
 

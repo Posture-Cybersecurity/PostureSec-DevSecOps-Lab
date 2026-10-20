@@ -88,6 +88,20 @@ One small override, [`compose.ec2.yaml`](compose.ec2.yaml), and why:
   instance (`user_data_replace_on_change`).
 * **Cost guard:** `cpu_credits = "standard"` (no surprise "unlimited" charges).
 
+## Incident 2026-10-20: bootstrap died on a Windows checkout (fixed)
+
+A deployment from a fresh Windows clone failed: no Docker, nothing on port 80,
+health check 1 passed / 13 failed. Git for Windows' default `core.autocrlf=true`
+checked `user_data.sh` out with CRLF, and bash on the instance stopped at line 15
+(`set: pipefail: invalid option name` in `/var/log/cloud-init-output.log`;
+`cloud-init status: error`; no `/var/log/postureblog-bootstrap.log`).
+Fix: `main.tf` strips `` from `user_data.sh` and `compose.ec2.yaml`, a test
+asserts the rendered user data has none, and `.gitattributes` checks `*.sh` and
+these YAML files out with LF.
+
+If a run ever shows the same symptoms, check over SSM:
+`grep -n -i "invalid option\|command not found" /var/log/cloud-init-output.log`.
+
 ## Known limitations (accepted for a disposable lab)
 
 | Limitation | Note |
@@ -99,7 +113,7 @@ One small override, [`compose.ec2.yaml`](compose.ec2.yaml), and why:
 | Single instance, no backups | The database is a Docker volume on the root disk; `destroy` deletes it |
 | Local Terraform state | One operator; nothing secret in it. A shared/team setup would add an S3 backend |
 | Default VPC | `subnet_id` selects another public subnet; accounts without a default VPC must set it |
-| Reboot recovery | Verified locally (out-of-order restart recovers in seconds), **not** on a real EC2 reboot |
+| Reboot recovery | Verified locally (out-of-order restart recovers in seconds) and on a real EC2 reboot (2026-10-20) |
 
 Scanner results (2026-10-20): **tfsec** 6 passed, 0 findings (see the egress
 caveat above). **Checkov 3.3.29** (CI flags): **30 passed / 3 failed** (29 / 4 before the
