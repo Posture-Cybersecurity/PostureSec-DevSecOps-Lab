@@ -1,7 +1,7 @@
 # Nene has just made a little change. Let's congratulate her.
 # Jennifer just made her way through her first PR, let's congratulate her. 
 # 🛡️ PostureSec — Posture Cybersecurity Platform
-
+# making a new update for test
 
 A cybersecurity knowledge platform built with a 3-tier architecture — React frontend, Node.js backend, and PostgreSQL database.
 
