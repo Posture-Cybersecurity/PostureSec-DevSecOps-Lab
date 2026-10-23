@@ -2,9 +2,11 @@ import { useState } from 'react';
 import { formatDistanceToNow } from 'date-fns';
 import { HiTrash } from 'react-icons/hi2';
 import { createComment, deleteComment } from '../api';
+import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
 
 function CommentSection({ postId, comments, onUpdate }) {
+  const { user } = useAuth();
   const [author, setAuthor] = useState('');
   const [content, setContent] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -82,15 +84,17 @@ function CommentSection({ postId, comments, onUpdate }) {
               </span>
             </div>
             <p className="comment-content">{comment.content}</p>
-            <div className="comment-actions">
-              <button
-                className="btn btn-ghost btn-sm"
-                onClick={() => handleDelete(comment.id)}
-                title="Delete comment"
-              >
-                <HiTrash size={14} />
-              </button>
-            </div>
+            {user && Number(user.id) === Number(comment.owner_id) && (
+              <div className="comment-actions">
+                <button
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => handleDelete(comment.id)}
+                  title="Delete comment"
+                >
+                  <HiTrash size={14} />
+                </button>
+              </div>
+            )}
           </div>
         ))}
       </div>

@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { pool } = require('../db');
-const { requireAuth } = require('../middleware/authenticate');
+const { requireAuth, isOwner } = require('../middleware/authenticate');
 
 // GET all posts (newest first)
 router.get('/', async (req, res) => {
@@ -73,17 +73,21 @@ router.put('/:id', requireAuth, async (req, res) => {
   }
 
   try {
+    const existing = await pool.query('SELECT * FROM posts WHERE id = $1', [req.params.id]);
+    if (existing.rows.length === 0) {
+      return res.status(404).json({ error: 'Post not found' });
+    }
+    if (!isOwner(existing.rows[0], req.user)) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
     const result = await pool.query(
       `UPDATE posts 
        SET title = $1, content = $2, author = $3, emoji = $4, updated_at = NOW() 
-       WHERE id = $5 
+       WHERE id = $5 AND owner_id = $6
        RETURNING *`,
-      [title, content, author || 'Anonymous', emoji || '🛡️', req.params.id]
+      [title, content, author || 'Anonymous', emoji || '🛡️', req.params.id, req.user.id]
     );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Post not found' });
-    }
 
     res.json(result.rows[0]);
   } catch (err) {
@@ -95,10 +99,18 @@ router.put('/:id', requireAuth, async (req, res) => {
 // DELETE post
 router.delete('/:id', requireAuth, async (req, res) => {
   try {
-    const result = await pool.query('DELETE FROM posts WHERE id = $1 RETURNING *', [req.params.id]);
-    if (result.rows.length === 0) {
+    const existing = await pool.query('SELECT * FROM posts WHERE id = $1', [req.params.id]);
+    if (existing.rows.length === 0) {
       return res.status(404).json({ error: 'Post not found' });
     }
+    if (!isOwner(existing.rows[0], req.user)) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    await pool.query(
+      'DELETE FROM posts WHERE id = $1 AND owner_id = $2 RETURNING *',
+      [req.params.id, req.user.id]
+    );
     res.json({ message: 'Post deleted successfully 🗑️' });
   } catch (err) {
     console.error(err);

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { getPost, deletePost } from '../api';
+import { useAuth } from '../context/AuthContext';
 import { formatDistanceToNow } from 'date-fns';
 import { HiArrowLeft, HiPencil, HiTrash } from 'react-icons/hi2';
 import CommentSection from '../components/CommentSection';
@@ -10,6 +11,7 @@ import toast from 'react-hot-toast';
 function PostDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [post, setPost] = useState(null);
   const [loading, setLoading] = useState(true);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -53,6 +55,7 @@ function PostDetail() {
 
   const timeAgo = formatDistanceToNow(new Date(post.created_at), { addSuffix: true });
   const wasEdited = post.updated_at !== post.created_at;
+  const canManage = user && Number(user.id) === Number(post.owner_id);
 
   return (
     <div className="post-detail">
@@ -70,14 +73,16 @@ function PostDetail() {
           {wasEdited && <span style={{ color: 'var(--accent-primary)' }}>(edited)</span>}
         </div>
 
-        <div className="post-detail-actions">
-          <Link to={`/edit/${post.id}`} className="btn btn-secondary btn-sm">
-            <HiPencil size={16} /> Edit
-          </Link>
-          <button className="btn btn-danger btn-sm" onClick={() => setShowDeleteModal(true)}>
-            <HiTrash size={16} /> Delete
-          </button>
-        </div>
+        {canManage && (
+          <div className="post-detail-actions">
+            <Link to={`/edit/${post.id}`} className="btn btn-secondary btn-sm">
+              <HiPencil size={16} /> Edit
+            </Link>
+            <button className="btn btn-danger btn-sm" onClick={() => setShowDeleteModal(true)}>
+              <HiTrash size={16} /> Delete
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="post-detail-content">{post.content}</div>
