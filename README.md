@@ -1,5 +1,5 @@
-# Nene has just made a little change. Let's congratulate her.
-# Jennifer just made her way through her first PR, let's congratulate her. 
+# chinedu has just made a little change. Let's congratulate him.
+# chinedu just made his way through his first PR, let's congratulate him. 
 # 🛡️ PostureSec — Posture Cybersecurity Platform
 
 
