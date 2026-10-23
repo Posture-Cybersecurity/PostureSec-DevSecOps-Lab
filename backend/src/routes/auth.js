@@ -63,7 +63,7 @@ router.post('/login', async (req, res) => {
 
     // One message and one status for both "no such user" and "wrong password",
     // so the endpoint cannot be used to enumerate accounts.
-    const ok = user && (await verifyPassword(password, user.password_hash));
+    const ok = user && verifyPassword(password, user.password_hash);
     if (!ok) {
       return res.status(401).json({ error: 'Invalid email or password' });
     }
