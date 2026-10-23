@@ -37,6 +37,7 @@ function Home() {
         <h1>Welcome to PostureSec 🛡️</h1>
         <p>This is a local deployment of my Engineering project, I love what I'm seeing, this is done by Emmanuel of braco Sqaud</p>
         <div className="vibe-tags">
+          <p>It's me Augustine welcoming you</p>
           <span className="vibe-tag">🔒 threat intel</span>
           <span className="vibe-tag">🛡️ zero trust</span>
           <span className="vibe-tag">🔍 security posture</span>
