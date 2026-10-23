@@ -1,7 +1,12 @@
 const express = require('express');
 const router = express.Router();
 const { pool } = require('../db');
-const { requireAuth } = require('../middleware/authenticate');
+const { requireAuth, requireOwnership } = require('../middleware/authenticate');
+
+const requirePostOwner = requireOwnership(async (req) => {
+  const result = await pool.query('SELECT owner_id FROM posts WHERE id = $1', [req.params.id]);
+  return result.rows[0]?.owner_id ?? null;
+});
 
 // GET all posts (newest first)
 router.get('/', async (req, res) => {
@@ -65,7 +70,7 @@ router.post('/', requireAuth, async (req, res) => {
 });
 
 // UPDATE post
-router.put('/:id', requireAuth, async (req, res) => {
+router.put('/:id', requireAuth, requirePostOwner, async (req, res) => {
   const { title, content, author, emoji } = req.body;
 
   if (!title || !content) {
@@ -93,7 +98,7 @@ router.put('/:id', requireAuth, async (req, res) => {
 });
 
 // DELETE post
-router.delete('/:id', requireAuth, async (req, res) => {
+router.delete('/:id', requireAuth, requirePostOwner, async (req, res) => {
   try {
     const result = await pool.query('DELETE FROM posts WHERE id = $1 RETURNING *', [req.params.id]);
     if (result.rows.length === 0) {

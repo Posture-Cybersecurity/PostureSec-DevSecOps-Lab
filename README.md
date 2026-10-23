@@ -224,3 +224,6 @@ npx jest -t "valid credentials issue a session cookie"
 ---
 
 Built with 💚 by the Posture Cybersecurity team. 🛡️
+
+# Modification in this Branch
+Users are not allowed to add author when making a post, the author username is automatically extracted from the email
