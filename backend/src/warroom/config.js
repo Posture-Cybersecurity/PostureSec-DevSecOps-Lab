@@ -45,7 +45,7 @@ const config = {
 
 // Which incident this instance runs. Default INC-001 (Sprint 1) so NOTHING about
 // the existing exercise changes unless another incident is explicitly selected.
-const _INCIDENTS = ['INC-001', 'INC-002', 'INC-003'];
+const _INCIDENTS = ['INC-001', 'INC-002', 'INC-003', 'INC-004', 'INC-005'];
 const _sel = (process.env.WAR_ROOM_INCIDENT || 'INC-001').trim().toUpperCase();
 config.incident = _INCIDENTS.includes(_sel) ? _sel : 'INC-001';
 config.incidentId = config.incident;
@@ -93,5 +93,26 @@ config.actors = {
   attacker: { email: 'mallory.attacker@warroom.local', password: 'warroom-attacker-passphrase-01' },
 };
 config.syntheticEmailDomain = '@warroom.local';
+
+// INC-004 mode. 'simulation' (default): the deterministic exercise, nothing reaches AWS.
+// 'live': this War Room is ONE squad's control plane for its real EC2 lab (warroom/inc004/squad/):
+// it deploys, arms, fires, verifies and scores on its own, acting as the SQUAD's least-privilege
+// AWS identity (a profile name; never root, never a raw key). Run it on its own host/port, never
+// behind the lab's port 80, so the squad can still reach it during the outage.
+const _cidrs = (process.env.WAR_ROOM_INC004_SQUAD_CIDRS || '').split(',').map((c) => c.trim()).filter(Boolean);
+config.inc004 = {
+  mode: (process.env.WAR_ROOM_INC004_MODE || 'simulation').trim().toLowerCase() === 'live' ? 'live' : 'simulation',
+  squad: (process.env.WAR_ROOM_SQUAD || '').trim(),
+  squadCidrs: _cidrs,
+  accountId: (process.env.WAR_ROOM_INC004_ACCOUNT_ID || '').trim(),
+  awsProfile: (process.env.WAR_ROOM_INC004_AWS_PROFILE || '').trim(),
+  // Root only when the owner authorized it for THIS account: WAR_ROOM_INC004_ALLOW_ROOT=dedicated-lab-<account id>.
+  allowRoot: (process.env.WAR_ROOM_INC004_ALLOW_ROOT || '').trim() !== ''
+    && (process.env.WAR_ROOM_INC004_ALLOW_ROOT || '').trim() === `dedicated-lab-${(process.env.WAR_ROOM_INC004_ACCOUNT_ID || '').trim()}`,
+  tickSeconds: num('WAR_ROOM_INC004_TICK_SECONDS', 30, 5, 600),
+  fuseSeconds: num('WAR_ROOM_INC004_FUSE_SECONDS', 180, 30, 3600),
+  graceSeconds: num('WAR_ROOM_INC004_GRACE_SECONDS', 900, 0, 86400),
+  maxLifetimeSeconds: num('WAR_ROOM_INC004_MAX_LIFETIME_SECONDS', 10800, 1800, 28800),
+};
 
 module.exports = config;

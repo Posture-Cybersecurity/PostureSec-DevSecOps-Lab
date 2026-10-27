@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Fake terraform for squad-lab.sh drift tests. Logs every call; never touches AWS.
+args=(); for a in "$@"; do case "$a" in -chdir=*) ;; *) args+=("$a");; esac; done
+echo "terraform TF_WORKSPACE=${TF_WORKSPACE:-} INC=${TF_VAR_warroom_incident:-} ${args[*]}" >> "$SHIM_LOG"
+tag="${FAKE_TAG:-INC-005}"; sq="${FAKE_TAG_SQUAD:-${TF_WORKSPACE:-alpha}}"
+case "${args[0]}" in
+  init|workspace) exit 0 ;;
+  state) [ "${args[1]}" = list ] && for _ in $(seq "${FAKE_STATE_COUNT:-0}"); do echo res; done; exit 0 ;;
+  output) case "${args[2]}" in
+            security_group_id) echo "${FAKE_SG:-sg-0bbbbbbbbbbbbbbbb}" ;;
+            instance_id) echo "i-0ccccccccccccccc" ;;
+            app_url) echo "http://192.0.2.50" ;;
+            *) exit 1 ;;
+          esac ;;
+  plan) for a in "${args[@]}"; do case "$a" in -out=*) echo plan > "${a#-out=}";; esac; done
+        echo "Terraform will perform the following actions:"; echo "Plan: 1 to add, 0 to change, 0 to destroy."; exit 0 ;;
+  show) f="${args[2]:-}"
+        if [ -z "$f" ]; then cat "$FIXTURES/state.json"; exit 0; fi
+        case "$(basename "$f")" in
+          restore-*) sed "s/\"WarRoom\": *\"INC-005\"/\"WarRoom\": \"$tag\"/g; s/\"WarRoomSquad\": *\"alpha\"/\"WarRoomSquad\": \"$sq\"/g" "$FIXTURES/restore-plan.json" ;;
+          *) printf '{"resource_changes":[{"address":"module.lab.aws_instance.app","module_address":"module.lab","mode":"managed","type":"aws_instance","change":{"actions":["create"],"before":null,"after":{"tags_all":{"WarRoom":"%s","WarRoomSquad":"%s"}}}}]}\n' "$tag" "$sq" ;;
+        esac ;;
+  apply) echo "Apply complete! Resources: 1 added, 0 changed, 0 destroyed." ;;
+esac

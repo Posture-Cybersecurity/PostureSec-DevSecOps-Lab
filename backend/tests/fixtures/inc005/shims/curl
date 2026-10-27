@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Fake curl: the control plane's egress address is the squad's approved /32.
+echo "curl $*" >> "$SHIM_LOG"
+case "$*" in *checkip*) echo "${FAKE_PROBE_IP:-203.0.113.10}" ;; *) echo 000 ;; esac

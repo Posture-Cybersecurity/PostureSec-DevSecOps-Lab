@@ -1,0 +1,49 @@
+# =============================================================================
+# INC-004 LIVE overlay: this War Room becomes ONE SQUAD's control plane for its real EC2 lab.
+# Layer it on the base War Room file and the INC-004 overlay (warroom.sh does this when
+# WAR_ROOM_INC004_MODE=live):
+#
+#   docker compose -f docker-compose.warroom.yml -f docker-compose.inc004.yml \
+#     -f docker-compose.inc004-live.yml -p posturesec-warroom-<squad> up -d --build
+#
+# Required (the squad's, set by whoever starts the squad's War Room — a squad member):
+#   WARROOM_LIVE_SQUAD          e.g. alpha
+#   WARROOM_LIVE_SQUAD_CIDRS    the squad's approved addresses, comma-separated; MUST include
+#                               this control plane's own egress address (it probes from there)
+#   WARROOM_LIVE_ACCOUNT_ID     the lab account
+#   WARROOM_LIVE_AWS_PROFILE    the SQUAD's least-privilege profile name (never root)
+#   WARROOM_LIVE_AWS_DIR        a directory holding that profile's AWS config, mounted read-only
+#
+# Run it on its OWN host/port (this War Room on :8080 of a laptop or the War Room host), never
+# behind the lab's port 80: the squad must reach it during the outage.
+#
+# STATE: the squad's Terraform state, plans and history are on named volumes. NEVER remove them
+# (no `down -v`) while the squad lab exists — that would orphan billable resources. warroom.sh
+# keeps them on `down` in live mode.
+# =============================================================================
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: warroom/inc004/squad/Dockerfile.control-plane
+    environment:
+      WAR_ROOM_INCIDENT: "INC-004"
+      WAR_ROOM_INC004_MODE: "live"
+      WAR_ROOM_SQUAD: "${WARROOM_LIVE_SQUAD:?set WARROOM_LIVE_SQUAD}"
+      WAR_ROOM_INC004_SQUAD_CIDRS: "${WARROOM_LIVE_SQUAD_CIDRS:?set WARROOM_LIVE_SQUAD_CIDRS}"
+      WAR_ROOM_INC004_ACCOUNT_ID: "${WARROOM_LIVE_ACCOUNT_ID:?set WARROOM_LIVE_ACCOUNT_ID}"
+      WAR_ROOM_INC004_AWS_PROFILE: "${WARROOM_LIVE_AWS_PROFILE:?set WARROOM_LIVE_AWS_PROFILE}"
+      # Only when the account owner authorized root for THIS dedicated lab: dedicated-lab-<account id>.
+      WAR_ROOM_INC004_ALLOW_ROOT: "${WARROOM_LIVE_ALLOW_ROOT:-}"
+      AWS_CONFIG_FILE: /aws/config
+      AWS_SHARED_CREDENTIALS_FILE: /aws/credentials
+    volumes:
+      - "${WARROOM_LIVE_AWS_DIR:?set WARROOM_LIVE_AWS_DIR}:/aws:ro"
+      - inc004_operator:/srv/warroom/inc004/.operator
+      - inc004_tfstate:/srv/warroom/inc004/terraform/terraform.tfstate.d
+      - inc004_tfdata:/srv/warroom/inc004/terraform/.terraform
+
+volumes:
+  inc004_operator: {}
+  inc004_tfstate: {}
+  inc004_tfdata: {}

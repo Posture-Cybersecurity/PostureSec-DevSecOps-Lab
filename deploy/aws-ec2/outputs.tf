@@ -33,7 +33,7 @@ output "deployed_git_ref" {
 
 output "ssm_session_command" {
   description = "Shell on the instance without SSH (needs the Session Manager plugin)"
-  value       = var.enable_ssm ? "aws ssm start-session --region ${var.aws_region} --target ${aws_instance.app.id}" : null
+  value       = var.enable_ssm || var.instance_profile_name != null ? "aws ssm start-session --region ${var.aws_region} --target ${aws_instance.app.id}" : null
 }
 
 output "bootstrap_log" {

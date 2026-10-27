@@ -136,3 +136,23 @@ variable "app_git_ref" {
     error_message = "app_git_ref must be a full commit SHA or a plain branch/tag name."
   }
 }
+
+variable "extra_tags" {
+  description = "Additional tags for every resource (e.g. a War Room marker). Cannot override the stack's own Project/Stack/Environment/Owner/ManagedBy tags. Default: none"
+  type        = map(string)
+  default     = {}
+  validation {
+    condition     = length(var.extra_tags) <= 10 && alltrue([for k, v in var.extra_tags : can(regex("^[A-Za-z][A-Za-z0-9_.:/=+@-]{0,62}$", k)) && length(v) <= 128])
+    error_message = "extra_tags: at most 10 tags, keys 1-63 safe characters starting with a letter, values up to 128 characters."
+  }
+}
+
+variable "instance_profile_name" {
+  description = "Use this EXISTING instance profile instead of creating the SSM role and profile (e.g. one pre-created per War Room squad), so whoever deploys needs no IAM write permission. null (default) = create them when enable_ssm is true"
+  type        = string
+  default     = null
+  validation {
+    condition     = var.instance_profile_name == null || can(regex("^postureblog-ec2-[a-z0-9-]{1,80}$", var.instance_profile_name))
+    error_message = "instance_profile_name must be a postureblog-ec2-* profile name."
+  }
+}

@@ -1,0 +1,17 @@
+# Only the INC-004 control-plane image builds from the repository root. Keep state, secrets,
+# operator material and local build output out of its context.
+**/node_modules
+**/.terraform
+**/*.tfstate
+**/*.tfstate.*
+**/*.tfplan
+**/terraform.tfvars
+**/.operator
+**/.env
+.git
+frontend
+docs
+dist
+# The fake driver is for tests only; it must never be in the control-plane image.
+warroom/inc004/squad/driver-fake.js
+warroom/inc004/squad/driver-fake-drift.js

@@ -1,0 +1,8 @@
+# Terraform working files and state never belong in git.
+**/.terraform/
+**/*.tfstate
+**/*.tfstate.*
+**/*.tfplan
+**/.terraform.tfstate.lock.info
+# Operator-only material: settings, plans and run evidence with account details.
+.operator/

@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 import { getIncident } from '../api';
+import TfWorkspace from '../components/TfWorkspace';
+import LiveWorkspace from '../components/LiveWorkspace';
 
 /**
  * The incident brief the squad opens from the alarm.
@@ -61,6 +63,8 @@ function IncidentPage() {
           application, its logs, its database, and its source before you write it down.
         </p>
       </div>
+
+      {incident.workspace && (incident.live ? <LiveWorkspace /> : <TfWorkspace />)}
     </div>
   );
 }

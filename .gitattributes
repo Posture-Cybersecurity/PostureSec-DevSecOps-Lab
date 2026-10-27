@@ -10,3 +10,5 @@ deploy/aws-ec2/*.yaml text eol=lf
 docs/warroom/instructor export-ignore
 docs/warroom/instructor/** export-ignore
 backend/tests/warroom_remediation.test.js export-ignore
+# squad-lab.sh test shims run under bash: LF on every checkout
+backend/tests/fixtures/inc005/shims/* text eol=lf

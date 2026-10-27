@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
-# War Room control script (Sprint 1 INC-001 / Sprint 2 INC-002 / Sprint 3 INC-003).
+# War Room control script (Sprint 1 INC-001 / Sprint 2 INC-002 / Sprint 3 INC-003 /
+# INC-004 Terraform apply that broke production, EC2 edition).
 #
 # PREREQUISITE: Docker Engine + the Compose plugin must already be installed and
 # running. On a fresh Ubuntu EC2 run `sudo bash deploy/warroom-ec2-bootstrap.sh`
@@ -11,7 +12,8 @@
 # layering docker-compose.api4.yml over the base file. Run the Sprint 1 exercise
 # with `WAR_ROOM_INCIDENT=INC-001 ./warroom.sh up`, or the Sprint 3 image-security
 # exercise with `WAR_ROOM_INCIDENT=INC-003 ./warroom.sh up` (which layers
-# docker-compose.inc003.yml).
+# docker-compose.inc003.yml), or the Terraform-on-EC2 exercise with
+# `WAR_ROOM_INCIDENT=INC-004 ./warroom.sh up` (docker-compose.inc004.yml).
 #
 # STUDENT / single-machine use (the default — no squad number needed):
 #
@@ -79,8 +81,13 @@ COMPOSE=(docker compose -f docker-compose.warroom.yml)
 case "$WAR_ROOM_INCIDENT" in
   INC-002) COMPOSE+=(-f docker-compose.api4.yml) ;;
   INC-003) COMPOSE+=(-f docker-compose.inc003.yml) ;;
+  INC-004) COMPOSE+=(-f docker-compose.inc004.yml)
+           # Live mode: this War Room is one squad's control plane for its REAL EC2 lab.
+           [ "${WAR_ROOM_INC004_MODE:-simulation}" = live ] && COMPOSE+=(-f docker-compose.inc004-live.yml) ;;
+  # INC-005 console hotfix drift: always the squad's REAL lab, on the INC-004 live control plane.
+  INC-005) COMPOSE+=(-f docker-compose.inc004-live.yml -f docker-compose.inc005.yml) ;;
   INC-001) : ;;
-  *) echo "unknown WAR_ROOM_INCIDENT '${WAR_ROOM_INCIDENT}' (expected INC-001, INC-002 or INC-003)" >&2; exit 2 ;;
+  *) echo "unknown WAR_ROOM_INCIDENT '${WAR_ROOM_INCIDENT}' (expected INC-001, INC-002, INC-003, INC-004 or INC-005)" >&2; exit 2 ;;
 esac
 APP_URL="http://localhost:${WARROOM_HTTP_PORT}"
 API_URL="${APP_URL}/api"
@@ -102,8 +109,15 @@ case "$cmd" in
     [ -n "${WAR_ROOM_INSTRUCTOR_TOKEN:-}" ] && echo "    (instructor token set for trigger/reset)"
     ;;
   down)
-    echo "==> stopping and removing the app and its local database"
-    "${COMPOSE[@]}" down -v --remove-orphans
+    if [ "$WAR_ROOM_INCIDENT" = INC-005 ] || { [ "$WAR_ROOM_INCIDENT" = INC-004 ] && [ "${WAR_ROOM_INC004_MODE:-simulation}" = live ]; }; then
+      # The volumes hold the squad's Terraform state: removing them while the lab exists would
+      # orphan billable AWS resources. Destroy the lab from the War Room first (Destroy the squad lab).
+      echo "==> stopping the squad control plane (state volumes KEPT)"
+      "${COMPOSE[@]}" down --remove-orphans
+    else
+      echo "==> stopping and removing the app and its local database"
+      "${COMPOSE[@]}" down -v --remove-orphans
+    fi
     ;;
   status)  curl -s "${API_URL}/incident/status"; echo ;;
   trigger) curl -s -X POST "${token_hdr[@]}" "${API_URL}/incident/trigger"; echo ;;

@@ -15,6 +15,9 @@ let _handle = null;
 
 function armIncidentTimer() {
   if (!config.enabled) return null;
+  // INC-004 live mode: the squad platform loop is the fuse (arms on readiness, fires once).
+  const inj = incidents.active();
+  if (typeof inj.startLoop === 'function') return inj.startLoop();
   // Idempotent: clear any existing fuse first, so this can never schedule two.
   if (_handle) { clearTimeout(_handle); _handle = null; }
   const ms = config.delaySeconds * 1000;

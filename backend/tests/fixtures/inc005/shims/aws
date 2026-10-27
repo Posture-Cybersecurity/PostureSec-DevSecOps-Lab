@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Fake AWS CLI for squad-lab.sh drift tests. The "live" security group rule disappears once revoked.
+echo "aws $*" >> "$SHIM_LOG"
+case "$1 $2" in
+  "sts get-caller-identity") printf '{"Account":"%s","Arn":"%s"}\n' "$FAKE_ACCOUNT" "$FAKE_ARN" ;;
+  "ssm get-parameter") echo "${FAKE_AMI:-ami-0123456789abcdef0}" ;;
+  "ec2 describe-security-groups")
+    case "$*" in
+      *--group-ids*) printf '[{"Key":"WarRoom","Value":"%s"},{"Key":"WarRoomSquad","Value":"%s"}]\n' "${FAKE_SG_INCIDENT:-INC-005}" "${FAKE_SG_SQUAD:-alpha}" ;;
+      *) echo "" ;;
+    esac ;;
+  "ec2 describe-security-group-rules")
+    gone=false; [ -f "$REVOKED" ] || [ -n "${FAKE_RULE_ABSENT:-}" ] && gone=true
+    case "$*" in
+      *length\(*) if $gone; then echo 0; else echo 1; fi ;;
+      *) if $gone; then echo '[]'; else
+           printf '[{"SecurityGroupRuleId":"sgr-0aaaaaaaaaaaaaaaa","IsEgress":false,"IpProtocol":"tcp","FromPort":%s,"ToPort":%s,"CidrIpv4":"203.0.113.10/32"}]\n' "${FAKE_RULE_PORT:-80}" "${FAKE_RULE_PORT:-80}"
+         fi ;;
+    esac ;;
+  "ec2 revoke-security-group-ingress") : > "$REVOKED" ;;
+  *) : ;;
+esac

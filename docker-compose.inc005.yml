@@ -1,0 +1,15 @@
+# =============================================================================
+# INC-005 ("Console Hotfix Drift") overlay: the squad's control plane for its REAL EC2 lab, on
+# the INC-004 live control-plane image and settings. warroom.sh layers it as:
+#
+#   docker compose -f docker-compose.warroom.yml -f docker-compose.inc004-live.yml \
+#     -f docker-compose.inc005.yml -p posturesec-warroom-<n> up -d --build
+#
+# Same required variables as docker-compose.inc004-live.yml (WARROOM_LIVE_SQUAD, _SQUAD_CIDRS,
+# _ACCOUNT_ID, _AWS_PROFILE, _AWS_DIR; _ALLOW_ROOT only when authorized for that account), and
+# the same rule: NEVER `down -v` while the squad lab exists (the volumes hold its state).
+# =============================================================================
+services:
+  backend:
+    environment:
+      WAR_ROOM_INCIDENT: "INC-005"

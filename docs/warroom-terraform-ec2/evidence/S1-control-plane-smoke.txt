@@ -1,0 +1,5 @@
+fake driver in image: absent
+lock file: .terraform.lock.hcl
+REFUSED: AWS credentials unavailable or rejected (sts get-caller-identity failed)
+preflight without credentials: exit=1
+test hook in production: useDriverForTests is not available in production

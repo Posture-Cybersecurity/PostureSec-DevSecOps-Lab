@@ -1,0 +1,18 @@
+# =============================================================================
+# INC-004 ("The Terraform Apply That Broke Production — EC2 Edition") overlay.
+# Use it WITH the base War Room compose:
+#
+#   docker compose -f docker-compose.warroom.yml -f docker-compose.inc004.yml \
+#     -p posturesec-warroom-<squad> up -d --build
+#
+# ./warroom.sh layers this automatically when WAR_ROOM_INCIDENT=INC-004.
+#
+# It only selects INC-004. The squad investigates a deterministic simulation of
+# the class's EC2 stack served by the normal backend image; evidence captured
+# from the War Room EC2 lab (backend/src/warroom/tf_ec2/captured/) is used when
+# present. No squad container holds AWS credentials or talks to AWS or Terraform.
+# =============================================================================
+services:
+  backend:
+    environment:
+      WAR_ROOM_INCIDENT: "INC-004"

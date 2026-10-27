@@ -1,0 +1,42 @@
+# =============================================================================
+# INC-004 squad CONTROL PLANE image: the War Room backend in live mode plus what it drives —
+# terraform, the AWS CLI, jq, bash, curl — and the War Room / EC2 stack files it applies.
+# Build context: the repository root (docker-compose.inc004-live.yml sets it).
+#
+# Runs as a non-root user on a read-only root filesystem. Writable, persistent state lives on
+# volumes only: the squad's Terraform state (terraform.tfstate.d), the provider cache (.terraform)
+# and the squad's plans/config/history (.operator). AWS access is a PROFILE from a read-only
+# mounted config directory — no credential is baked into the image or passed as a variable.
+# =============================================================================
+FROM node:20-alpine AS build
+WORKDIR /srv/backend
+COPY backend/package.json backend/package-lock.json* ./
+RUN npm ci --only=production && npm cache clean --force
+
+FROM node:20-alpine
+ARG TERRAFORM_VERSION=1.11.3
+# terraform: the official release zip, verified against HashiCorp's published SHA256SUMS.
+RUN apk --no-cache add dumb-init bash curl jq aws-cli unzip \
+ && cd /tmp \
+ && curl -fsSLO "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip" \
+ && curl -fsSLO "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_SHA256SUMS" \
+ && grep " terraform_${TERRAFORM_VERSION}_linux_amd64.zip\$" "terraform_${TERRAFORM_VERSION}_SHA256SUMS" | sha256sum -c - \
+ && unzip -q "terraform_${TERRAFORM_VERSION}_linux_amd64.zip" -d /usr/local/bin \
+ && rm -f /tmp/terraform_* \
+ && addgroup -S appgroup && adduser -S appuser -G appgroup
+
+# The same relative layout as the repository, so backend/src/warroom/* finds ../../../warroom/inc004.
+WORKDIR /srv
+COPY --from=build /srv/backend/node_modules ./backend/node_modules
+COPY backend/src ./backend/src
+COPY warroom/inc004 ./warroom/inc004
+COPY deploy/aws-ec2 ./deploy/aws-ec2
+RUN mkdir -p warroom/inc004/.operator warroom/inc004/terraform/.terraform warroom/inc004/terraform/terraform.tfstate.d \
+ && chown -R appuser:appgroup warroom/inc004/.operator warroom/inc004/terraform/.terraform warroom/inc004/terraform/terraform.tfstate.d
+
+USER appuser
+ENV HOME=/tmp TF_IN_AUTOMATION=1 TF_CLI_ARGS_init=-lockfile=readonly
+WORKDIR /srv/backend
+EXPOSE 5000
+ENTRYPOINT ["dumb-init", "--"]
+CMD ["node", "src/index.js"]

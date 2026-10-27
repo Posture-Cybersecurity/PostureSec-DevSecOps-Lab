@@ -1,0 +1,4 @@
+{"values":{"root_module":{"child_modules":[{"address":"module.lab","resources":[
+ {"address":"module.lab.aws_vpc_security_group_egress_rule.all","values":{"security_group_rule_id":"sgr-0eeeeeeeeeeeeeeee","cidr_ipv4":"0.0.0.0/0","security_group_id":"sg-0bbbbbbbbbbbbbbbb"}},
+ {"address":"module.lab.aws_vpc_security_group_ingress_rule.http[\"203.0.113.10/32\"]","values":{"security_group_rule_id":"sgr-0aaaaaaaaaaaaaaaa","cidr_ipv4":"203.0.113.10/32","security_group_id":"sg-0bbbbbbbbbbbbbbbb"}}
+]}]}}}

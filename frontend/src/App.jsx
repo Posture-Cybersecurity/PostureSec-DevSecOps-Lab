@@ -7,6 +7,7 @@ import CreatePost from './pages/CreatePost';
 import EditPost from './pages/EditPost';
 import Login from './pages/Login';
 import IncidentPage from './pages/IncidentPage';
+import LiveWorkspace from './components/LiveWorkspace';
 import { AuthProvider } from './context/AuthContext';
 
 function App() {
@@ -25,6 +26,8 @@ function App() {
             <Route path="/edit/:id" element={<EditPost />} />
             <Route path="/login" element={<Login />} />
             <Route path="/incident" element={<IncidentPage />} />
+            {/* INC-004 live: the squad's real-lab workspace, reachable before the incident too. */}
+            <Route path="/lab" element={<LiveWorkspace />} />
           </Routes>
         </main>
       </div>

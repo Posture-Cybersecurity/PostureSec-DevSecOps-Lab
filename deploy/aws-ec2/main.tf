@@ -28,19 +28,29 @@ provider "aws" {
   region              = var.aws_region
   allowed_account_ids = [var.allowed_account_id] # any other account -> provider error at start-up
 
+  # The War Room platform's progress tags (set out of band) are not configuration drift.
+  ignore_tags {
+    keys = ["WarRoomPhase", "WarRoomScore"]
+  }
+
   default_tags {
-    tags = {
+    # extra_tags first: the stack's own ownership tags always win.
+    tags = merge(var.extra_tags, {
       Project     = "PostureBlogging"
       Stack       = "postureblog-ec2"
       Environment = var.environment
       Owner       = var.owner
       ManagedBy   = "Terraform"
-    }
+    })
   }
 }
 
 locals {
   name = "postureblog-ec2-${var.environment}-${var.owner}"
+
+  # A pre-created instance profile (e.g. one per War Room squad, made by the instructor)
+  # replaces the role this stack would otherwise create, so the deployer needs no IAM write.
+  create_ssm_role = var.enable_ssm && var.instance_profile_name == null
 
   # Header + static script: user_data.sh stays plain bash (no template
   # escaping). Values are validated in variables.tf, so quoting is safe.
@@ -137,7 +147,7 @@ resource "aws_vpc_security_group_egress_rule" "all" {
 # ---- Optional: Session Manager (shell with no open port) --------------------
 
 resource "aws_iam_role" "ssm" {
-  count = var.enable_ssm ? 1 : 0
+  count = local.create_ssm_role ? 1 : 0
   name  = "${local.name}-ssm"
 
   assume_role_policy = jsonencode({
@@ -151,13 +161,13 @@ resource "aws_iam_role" "ssm" {
 }
 
 resource "aws_iam_role_policy_attachment" "ssm" {
-  count      = var.enable_ssm ? 1 : 0
+  count      = local.create_ssm_role ? 1 : 0
   role       = aws_iam_role.ssm[0].name
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
 resource "aws_iam_instance_profile" "ssm" {
-  count = var.enable_ssm ? 1 : 0
+  count = local.create_ssm_role ? 1 : 0
   name  = "${local.name}-ssm"
   role  = aws_iam_role.ssm[0].name
 }
@@ -172,7 +182,7 @@ resource "aws_instance" "app" {
   associate_public_ip_address = true
   ebs_optimized               = true # t3 is EBS-optimized by default; stated explicitly
   key_name                    = var.key_name
-  iam_instance_profile        = var.enable_ssm ? aws_iam_instance_profile.ssm[0].name : null
+  iam_instance_profile        = var.instance_profile_name != null ? var.instance_profile_name : (local.create_ssm_role ? aws_iam_instance_profile.ssm[0].name : null)
 
   user_data                   = local.user_data
   user_data_replace_on_change = true # a new commit or config = a fresh instance, not drift

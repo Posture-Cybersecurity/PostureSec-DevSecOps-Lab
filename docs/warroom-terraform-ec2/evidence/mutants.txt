@@ -1,0 +1,4 @@
+M1 no row lock (FOR UPDATE removed): Tests:       1 failed, 26 passed, 27 total [restored]
+M2 verify ignores console rules: Tests:       2 failed, 25 passed, 27 total [restored]
+M3 prototype keys resolve (own() bypassed): Tests:       2 failed, 25 passed, 27 total [restored]
+M4 guard allows resources outside module.lab: Tests:       1 failed, 9 passed, 10 total [restored]

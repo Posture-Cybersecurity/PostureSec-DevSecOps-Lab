@@ -1,0 +1,156 @@
+/**
+ * INC-004 LIVE injector — this War Room instance is ONE squad's control plane for its real
+ * EC2 lab. Same engine contract as every incident ({ runIncident, reset }), plus:
+ *
+ *   startLoop()   the platform loop (timer.js calls it instead of the boot fuse): every
+ *                 tickSeconds it runs the squad controller's tick — readiness, arm, fire ONCE,
+ *                 verify, score, auto-cleanup — and mirrors the phase onto the alarm banner.
+ *   squad()       the squad runner members' requests go through (operation-locked).
+ *
+ * State: ONE row per squad in warroom_inc004_live (JSONB), every change a row-locked
+ * read-modify-write, so the backend can restart at any point without losing the fuse or
+ * double-firing. Side effects: the REAL driver (warroom/inc004/squad/driver-real.js) acting
+ * as the squad's AWS profile. The fake driver is never chosen here; tests inject one with
+ * useDriverForTests().
+ *
+ * runIncident / reset (instructor endpoints) are the EMERGENCY override: trigger now / pause.
+ * Nothing in the normal journey needs them.
+ */
+const path = require('path');
+const { pool } = require('../db');
+const config = require('./config');
+const { getIncident, raiseIncident, setStatus } = require('./state');
+
+const SQUAD_DIR = path.join(__dirname, '../../../warroom/inc004/squad');
+const C = require(path.join(SQUAD_DIR, 'controller'));
+const { squadRunner } = require(path.join(SQUAD_DIR, 'runner'));
+
+const L = config.inc004;
+const ready = {};                 // per table: CREATE TABLE IF NOT EXISTS, once
+let runner = null;
+let loop = null;
+let injected = null;            // { driver, clock } — tests only
+
+// One squad row per table; INC-005 (drift) keeps its own table on the same store code.
+const TABLES = ['warroom_inc004_live', 'warroom_inc005_drift'];
+
+function ensureTables(table = TABLES[0]) {
+  if (!TABLES.includes(table)) throw new Error(`unknown squad table ${table}`);
+  if (!ready[table]) {
+    ready[table] = pool.query(`
+      CREATE TABLE IF NOT EXISTS ${table} (
+        squad      VARCHAR(20) PRIMARY KEY,
+        state      JSONB NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )`).catch((err) => { ready[table] = null; throw err; });
+  }
+  return ready[table];
+}
+
+/** A row-locked store for one squad (load / atomic update), as runner.js expects. */
+function dbStore(squad, initial, table = TABLES[0]) {
+  if (!TABLES.includes(table)) throw new Error(`unknown squad table ${table}`);
+  return {
+    load: async () => {
+      await ensureTables(table);
+      const { rows } = await pool.query(`SELECT state FROM ${table} WHERE squad = $1`, [squad]);
+      return rows[0] ? rows[0].state : initial();
+    },
+    update: async (mutator) => {
+      await ensureTables(table);
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query(`INSERT INTO ${table} (squad, state) VALUES ($1, $2::jsonb) ON CONFLICT (squad) DO NOTHING`,
+          [squad, JSON.stringify(initial())]);
+        const { rows } = await client.query(`SELECT state FROM ${table} WHERE squad = $1 FOR UPDATE`, [squad]);
+        const next = mutator(rows[0].state);
+        await client.query(`UPDATE ${table} SET state = $2::jsonb, updated_at = NOW() WHERE squad = $1`, [squad, JSON.stringify(next)]);
+        await client.query('COMMIT');
+        return next;
+      } catch (err) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw err;
+      } finally {
+        client.release();
+      }
+    },
+  };
+}
+
+function settings() {
+  const problems = [];
+  if (!/^[a-z0-9][a-z0-9-]{1,14}$/.test(L.squad)) problems.push('WAR_ROOM_SQUAD');
+  if (!L.squadCidrs.length) problems.push('WAR_ROOM_INC004_SQUAD_CIDRS');
+  if (!injected) {
+    if (!/^[0-9]{12}$/.test(L.accountId)) problems.push('WAR_ROOM_INC004_ACCOUNT_ID');
+    if (!L.awsProfile) problems.push('WAR_ROOM_INC004_AWS_PROFILE');
+  }
+  if (problems.length) throw new Error(`INC-004 live mode is not configured: ${problems.join(', ')}`);
+}
+
+function squad() {
+  if (runner) return runner;
+  settings();
+  const clock = injected ? injected.clock : Date.now;
+  const driver = injected ? injected.driver : require(path.join(SQUAD_DIR, 'driver-real')).createRealDriver({
+    squad: L.squad, squadCidrs: L.squadCidrs, accountId: L.accountId, profile: L.awsProfile, allowRoot: L.allowRoot,
+  });
+  const initial = () => C.create(L.squad, clock(), {
+    fuseSeconds: L.fuseSeconds, graceSeconds: L.graceSeconds, maxLifetimeSeconds: L.maxLifetimeSeconds,
+  });
+  runner = squadRunner({ store: dbStore(L.squad, initial), driver, clock });
+  return runner;
+}
+
+/** Mirror the squad's phase onto the shared alarm row the banner reads. */
+async function mirrorAlarm() {
+  const v = await squad().view();
+  const alarm = await getIncident();
+  if (['incident', 'recovering'].includes(v.phase) && (!alarm || alarm.status !== 'active')) {
+    if (!alarm || alarm.status === 'idle') await raiseIncident('SEV-1: PostureBlogging is unreachable for every user.', { incident: 'INC-004', squad: v.squad, live: true });
+  } else if (v.phase === 'completed' && alarm && alarm.status === 'active') {
+    await setStatus('resolved');
+  }
+  return v.phase;
+}
+
+/** One platform step (the loop's body; tests call it directly with a fake clock). */
+async function tickOnce() {
+  const r = await squad().tick();
+  await mirrorAlarm();
+  return r;
+}
+
+function startLoop() {
+  if (loop) return loop;                                     // one loop per squad control plane
+  squad();                                                  // fail fast on missing settings
+  console.log(`[warroom] INC-004 live: squad ${L.squad} platform loop every ${L.tickSeconds}s`);
+  loop = setInterval(() => {
+    tickOnce().catch((err) => console.error('[warroom] INC-004 live tick failed:', err.message));
+  }, L.tickSeconds * 1000);
+  if (typeof loop.unref === 'function') loop.unref();
+  return loop;
+}
+
+function stopLoop() { if (loop) { clearInterval(loop); loop = null; } }
+
+// Engine contract — the instructor's emergency controls, never the normal path.
+async function runIncident() {
+  const r = await squad().override('instructor', 'trigger_now');
+  return { incident: 'INC-004', live: true, ...r };
+}
+async function reset() {
+  const r = await squad().override('instructor', 'pause');
+  return { incident: 'INC-004', live: true, reset: true, note: 'paused; the squad lab is NOT destroyed (use override destroy)', ...r };
+}
+
+/** Tests only: run against an injected (fake) driver and clock. */
+function useDriverForTests(driver, clock) {
+  if (process.env.NODE_ENV === 'production') throw new Error('useDriverForTests is not available in production');
+  injected = { driver, clock };
+  runner = null;
+  stopLoop();
+}
+
+module.exports = { runIncident, reset, startLoop, stopLoop, tickOnce, squad, mirrorAlarm, ensureTables, dbStore, useDriverForTests };

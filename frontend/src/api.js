@@ -28,6 +28,21 @@ export const deleteComment = (id) => api.delete(`/comments/${id}`);
 // failure as "no incident" and render nothing.
 export const getIncidentStatus = () => api.get('/incident/status');
 export const getIncident = () => api.get('/incident');
+// INC-004 squad workspace (signed-in users only).
+export const getIncidentWorkspace = () => api.get('/incident/workspace');
+export const performIncidentAction = (action) => api.post('/incident/actions', { action });
+export const submitIncidentReport = (data) => api.post('/incident/report', data);
+// INC-004 LIVE: the squad's real EC2 lab.
+export const liveStart = () => api.post('/incident/live/start');
+export const liveEvidence = (id) => api.post('/incident/live/evidence', { id });
+export const liveConfig = (cidrs) => api.post('/incident/live/config', { cidrs });
+export const livePlan = () => api.post('/incident/live/plan');
+export const liveReview = (plan) => api.post('/incident/live/review', { plan });
+export const liveApply = (plan) => api.post('/incident/live/apply', { plan });
+export const liveReport = (data) => api.post('/incident/live/report', data);
+export const liveCleanup = () => api.post('/incident/live/cleanup');
+// INC-005 (console hotfix drift): read the squad's saved plan before applying it.
+export const liveInspect = (plan) => api.post('/incident/live/inspect', { plan });
 
 // Auth
 export const register = (data) => api.post('/auth/register', data);

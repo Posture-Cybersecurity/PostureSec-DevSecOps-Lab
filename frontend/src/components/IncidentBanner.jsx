@@ -34,7 +34,7 @@ function IncidentBanner() {
         <div style={styles.text}>
           <strong style={styles.title}>SECURITY INCIDENT DETECTED</strong>
           <span style={styles.body}>
-            Suspicious activity has been detected on your blogging platform.
+            {['INC-004', 'INC-005'].includes(incident.id) ? incident.headline : 'Suspicious activity has been detected on your blogging platform.'}
             {' '}Incident: <strong>{incident.id}</strong>. Investigate immediately.
           </span>
         </div>

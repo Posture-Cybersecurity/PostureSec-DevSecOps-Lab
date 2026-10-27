@@ -1,0 +1,21 @@
+T+0 status: {"id":"INC-004","active":false,"status":"idle","headline":null,"triggered_at":null,"contained_at":null,"resolved_at":null}
+fired after ~15s more: {"id":"INC-004","active":true,"status":"active","headline":"SEV-1: PostureBlogging is unreachable for every user.","triggered_at":"2026-10-27T16:12:47.036Z","contained_at":null,"resolved_at":null}
+brief: {"severity":"SEV-1","workspace":"/api/incident/workspace","brief":"PostureBlogging, running on the team’s EC2 instance, is unreachable for every us"}
+workspace anon: 401
+view_alert -> 200 down Evidence added.
+curl_public -> 200 down Evidence added.
+curl_localhost -> 200 down Evidence added.
+sg_rules -> 200 down Evidence added.
+my_ip -> 200 down Evidence added.
+git_log -> 200 down Evidence added.
+tfvars_diff -> 200 down Evidence added.
+show_last_plan -> 200 down Evidence added.
+plan_now -> 200 down Evidence added.
+propose_C1 -> 200 down Change C1 committed to a branch: "Add our address back alongside the V
+review_plan -> 200 down Plan for C1 produced.
+apply_plan -> 200 up Apply complete: 1 added, 0 changed, 0 destroyed. The classroom can rea
+verify -> 200 up Verification passed: http://192.0.2.44/api/health = 200 from the class
+report: {"message":"Report submitted.","score":100,"completed":true}
+status after: {"status":"resolved"}
+debrief no token: 403
+debrief: {"phase":"completed","total":100,"flags":{"fixed_in_terraform":true,"plan_reviewed_before_apply":true,"console_changes_made":false,"console_rules_still_present":false,"open_to_internet":false,"instance_replaced":false,"verified":true},"audit_rows":15}
