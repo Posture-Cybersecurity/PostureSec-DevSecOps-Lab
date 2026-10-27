@@ -2,3 +2,11 @@
 # out with LF, even on Windows with core.autocrlf=true (CRLF breaks bash).
 *.sh text eol=lf
 deploy/aws-ec2/*.yaml text eol=lf
+
+# War Room (Sprint 1) — keep instructor answer material OUT of the student
+# handout. `git archive` (used by scripts/make-student-handout.sh) honours
+# export-ignore, so these paths are excluded from anything squads receive, while
+# remaining in the repository for the instructor and the debrief.
+docs/warroom/instructor export-ignore
+docs/warroom/instructor/** export-ignore
+backend/tests/warroom_remediation.test.js export-ignore
