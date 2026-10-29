@@ -1,0 +1,14 @@
+# DSO-102: DevOps vs DevSecOps – Shift-Left in Practice
+
+**Documented by:** Emmanuella Blessing Udeh  
+**Date:** October 2026
+
+## Summary
+This document explains the difference between DevOps and DevSecOps and shows how security is applied at every stage of the SDLC on PostureSec (Shift-Left approach).
+
+Each pipeline stage is mapped to at least one automated security control.
+
+## Full Documentation
+Complete one-pager with SDLC stages and security controls:
+
+→ [DSO-102 – DevOps vs DevSecOps: Shift-Left in Practice](https://github.com/awsemmanuella-cloud/DSO-102-DevOps-vs-DevSecOps-Shift-Left-in-Practice)
