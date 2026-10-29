@@ -109,11 +109,28 @@ function createRealDriver({ squad, squadCidrs, accountId, profile, allowRoot = f
       return { allowed: m[1] === 'ALLOWED', summary: m[2] || m[1] };
     },
 
+    // INC-005, while the lab is healthy (read-only): resolve and check the rule the drift will delete.
+    async prepareDrift() {
+      const r = await run(['prepare-drift']);
+      const t = line(r.stdout, /^TARGET (sg-[0-9a-f]+) (sgr-[0-9a-f]+) (\S+)$/);
+      if (t) return { ok: true, sg: t[1], ruleId: t[2], cidr: t[3] };
+      const no = line(r.stdout, /^DRIFT REFUSED (.*)$/);
+      if (no) return { ok: false, summary: mask(`REFUSED: ${no[1]}`) };
+      throw new DriverError('no TARGET line from squad-lab.sh', r);
+    },
+
     // INC-005: delete the squad's Terraform-managed port-80 rule through the AWS API (idempotent).
-    async injectDrift() {
-      const r = await run(['inject-drift'], { kind: 'apply' });
-      const ok = line(r.stdout, /^DRIFT DELETED (sgr-[0-9a-f]+) (\S+)( already-absent)?$/);
-      if (ok) return { deleted: true, ruleId: ok[1], cidr: ok[2], already: Boolean(ok[3]) };
+    // With a prepared target the script skips Terraform and re-checks that one rule live first.
+    async injectDrift(target) {
+      const args = target ? ['inject-drift', target.sg, target.ruleId, target.cidr] : ['inject-drift'];
+      const spawned = Date.now();
+      const r = await run(args, { kind: 'apply' });
+      const returned = Date.now();
+      // Wall-clock marks (ms) around the one AWS mutation, for the instructor's latency record.
+      const tm = line(r.stdout, /^TIMING script_start=(\d+) checked=(\d+) revoke_start=(\d+) revoke_done=(\d+)$/);
+      const timing = { spawned, returned, ...(tm ? { script_start: +tm[1], checked: +tm[2], revoke_start: +tm[3], revoke_done: +tm[4] } : {}) };
+      const ok = line(r.stdout, /^DRIFT DELETED (sgr-[0-9a-f]+) (\S+)( already-absent)?(?: (fast|full))?$/);
+      if (ok) return { deleted: true, ruleId: ok[1], cidr: ok[2], already: Boolean(ok[3]), path: ok[4] || 'full', timing };
       const no = line(r.stdout, /^DRIFT (REFUSED|FAILED) (.*)$/);
       if (no) return { deleted: false, summary: mask(`${no[1]}: ${no[2]}`) };
       throw new DriverError('no DRIFT line from squad-lab.sh', r);

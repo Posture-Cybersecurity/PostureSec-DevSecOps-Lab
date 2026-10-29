@@ -10,7 +10,6 @@ process.env.WAR_ROOM_ENABLED = 'true';
 process.env.WAR_ROOM_INCIDENT = 'INC-005';
 process.env.WAR_ROOM_SQUAD = 'alpha';
 process.env.WAR_ROOM_INC004_SQUAD_CIDRS = '203.0.113.10/32';
-process.env.WAR_ROOM_INC004_FUSE_SECONDS = '180';
 process.env.WAR_ROOM_INC004_GRACE_SECONDS = '0';
 process.env.WAR_ROOM_INSTRUCTOR_TOKEN = 'inc005-token';
 process.env.WAR_ROOM_INCIDENT_DELAY_SECONDS = '86400';
@@ -23,6 +22,18 @@ const config = require('../src/warroom/config');
 const NET = '203.0.113.10/32';
 let t = Date.UTC(2026, 9, 28, 9, 0, 0);
 const clock = () => t;
+// Fake fuse timers: the drift fires only when a test advances the fake clock past it (fireDue).
+let handles = [];
+const timers = {
+  schedule: (fn, ms) => { const h = { at: t + ms, fn, cancelled: false }; handles.push(h); return h; },
+  cancel: (h) => { if (h) h.cancelled = true; },
+};
+const pendingFuse = () => handles.filter((h) => !h.cancelled);
+async function fireDue() {
+  for (const h of pendingFuse().filter((x) => x.at <= t).sort((a, b) => a.at - b.at)) {
+    const now = t; h.cancelled = true; t = h.at; await h.fn(); t = Math.max(t, now);   // runs at its due time
+  }
+}
 const advance = (s) => { t += s * 1000; };
 let driver;
 
@@ -35,6 +46,7 @@ beforeAll(async () => {
     pool = db.pool;
     await db.initDB();
     await require('../src/warroom/state').initWarRoom();
+    await require('../src/warroom/state').setStatus('idle');   // the alarm row is shared by every suite in this database
     await drift.ensureTables();
     await pool.query('DELETE FROM warroom_inc005_drift');
     server = require('../src/index').listen(0);
@@ -63,9 +75,12 @@ const as = (cookie) => ({
   get: (p) => request(server).get(`/api/incident${p}`).set('Cookie', cookie),
   post: (p, body = {}) => request(server).post(`/api/incident${p}`).set('Cookie', cookie).send(body),
 });
-async function settle() {
+// A 202 can answer before the lock row is visible under load, so "not busy" alone is not "done":
+// also wait for the operation's own outcome.
+async function settle(landed = () => true) {
   for (let i = 0; i < 300; i += 1) {
-    if (!(await drift.squad().view()).busy) return;
+    const v = await drift.squad().view();
+    if (!v.busy && landed(v)) return;
     await new Promise((r) => setTimeout(r, 10));
   }
   throw new Error('operation never finished');
@@ -78,7 +93,7 @@ describe('INC-005 live: one squad, its members, through the real API and databas
     driver = createFakeDriftDriver({ account: createFakeAccount(), squad: 'alpha', squadCidrs: [NET], clock, bootSeconds: 240 });
     const slowApply = driver.apply;
     driver.apply = async (name) => { await new Promise((r) => setTimeout(r, 150)); return slowApply(name); };
-    drift.useDriverForTests(driver, clock);
+    drift.useDriverForTests(driver, clock, timers);
     alice = as(await signIn('alice@alpha5.test'));
     bob = as(await signIn('bob@alpha5.test'));
     carol = as(await signIn('carol@alpha5.test'));
@@ -96,15 +111,20 @@ describe('INC-005 live: one squad, its members, through the real API and databas
 
   dbTest('the journey: deploy, AUTO ready, AUTO drift (alarm), investigate, plan, inspect, apply, AUTO verify + score, cleanup — no instructor', async () => {
     expect((await alice.post('/live/start')).status).toBe(202);
-    await settle();
+    await settle((v) => v.phase !== 'new');
     expect((await alice.get('/workspace')).body.phase).toBe('booting');
 
     advance(240); await drift.tickOnce();
+    const readyState = await drift.squad().state();
+    expect(pendingFuse().map((h) => h.at)).toEqual([readyState.ready_at + 300 * 1000 + 5]);   // armed from the ready event
     expect((await bob.get('/workspace')).body.phase).toBe('ready');
     expect((await request(server).get('/api/incident/status')).body.active).toBe(false);
 
-    advance(180); await drift.tickOnce();
+    advance(299); await fireDue(); await drift.tickOnce();
+    expect((await bob.get('/workspace')).body.phase).toBe('ready');                // not before 5 minutes
+    advance(1.01); await fireDue();
     expect((await bob.get('/workspace')).body.phase).toBe('incident');
+    expect(Date.parse((await drift.squad().state()).injection.at) - readyState.ready_at).toBe(300 * 1000 + 5);
     expect((await request(server).get('/api/incident/status')).body).toMatchObject({ active: true, headline: 'SEV-2: PostureBlogging is unreachable from the squad\'s network.' });
     await drift.tickOnce();                                                   // outage recorded
     expect((await carol.get('/workspace')).body.timeline.map((e) => e.event)).toContain('detected');
@@ -115,7 +135,7 @@ describe('INC-005 live: one squad, its members, through the real API and databas
     expect((await bob.post('/live/evidence', { id: 'cat /etc/passwd' })).status).toBe(400);
 
     expect((await bob.post('/live/plan')).status).toBe(202);
-    await settle();
+    await settle((v) => v.pending_plan);
     const plan = (await bob.get('/workspace')).body.pending_plan;
     expect(plan).toMatchObject({ by: 'bob@alpha5.test', summary: 'Plan: 1 to add, 0 to change, 0 to destroy.' });
     expect((await carol.post('/live/inspect', { plan: plan.name })).body.message).toMatch(/1 to add/);
@@ -129,7 +149,7 @@ describe('INC-005 live: one squad, its members, through the real API and databas
     const second = await alice.post('/live/apply', { plan: plan.name });
     expect(second.status).toBe(409);
     expect(second.body.error).toMatch(/bob@alpha5.test is running "apply"/);
-    await settle();
+    await settle((v) => v.applied.length > 0);
     expect(driver.lab.tf.max).toBe(1);
 
     await drift.tickOnce();
@@ -145,7 +165,7 @@ describe('INC-005 live: one squad, its members, through the real API and databas
     expect(JSON.stringify(d.body.timeline)).not.toContain('203.0.113.10');
 
     expect((await alice.post('/live/cleanup')).status).toBe(202);
-    await settle();
+    await settle((v) => v.phase === 'cleaned');
     expect((await alice.get('/workspace')).body.phase).toBe('cleaned');
     expect(await driver.remaining()).toEqual([]);
   }, 30000);
@@ -162,11 +182,11 @@ describe('INC-005 live: no lock contention, persistence, separation', () => {
   dbTest('during a long platform check, members get answers, not 409s', async () => {
     await pool.query('DELETE FROM warroom_inc005_drift');
     const d = createFakeDriftDriver({ account: createFakeAccount(), squad: 'alpha', squadCidrs: [NET], clock, bootSeconds: 60 });
-    drift.useDriverForTests(d, clock);
+    drift.useDriverForTests(d, clock, timers);
     const bob = as(await signIn('bob@alpha5.test'));
     await drift.squad().start('alice@alpha5.test');
     advance(60); await drift.tickOnce();
-    advance(180); await drift.tickOnce();
+    advance(301); await fireDue();
     expect((await drift.squad().view()).phase).toBe('incident');
     let release;
     d.gate = new Promise((r) => { release = r; });
@@ -178,7 +198,7 @@ describe('INC-005 live: no lock contention, persistence, separation', () => {
     answers.push((await bob.post('/live/evidence', { id: 'sg_rules' })).status);
     answers.push((await bob.get('/workspace')).status);
     answers.push((await bob.post('/live/plan')).status);
-    await settle();
+    await settle((v) => v.pending_plan);
     const plan = (await bob.get('/workspace')).body.pending_plan;
     answers.push((await bob.post('/live/inspect', { plan: plan.name })).status);
     expect(answers).toEqual([200, 200, 202, 200]);
@@ -189,15 +209,18 @@ describe('INC-005 live: no lock contention, persistence, separation', () => {
   dbTest('a restarted control plane keeps the fuse and never injects twice', async () => {
     await pool.query('DELETE FROM warroom_inc005_drift');
     const d2 = createFakeDriftDriver({ account: createFakeAccount(), squad: 'alpha', squadCidrs: [NET], clock, bootSeconds: 60 });
-    drift.useDriverForTests(d2, clock);
+    handles = [];
+    drift.useDriverForTests(d2, clock, timers);
     await drift.squad().start('alice@alpha5.test');
     advance(60); await drift.tickOnce();
     const fireAt = (await drift.squad().state()).fire_at;
-    drift.useDriverForTests(d2, clock);                                       // "restart": new runner, same row
+    handles = [];
+    drift.useDriverForTests(d2, clock, timers);                                       // "restart": new runner, same row
     await drift.tickOnce();
     expect((await drift.squad().state()).fire_at).toBe(fireAt);
     for (let i = 0; i < 8; i += 1) { advance(60); await drift.tickOnce(); }
-    expect(d2.calls.filter((c) => c === 'injectDrift')).toHaveLength(1);
+    expect(d2.calls.filter((c) => c.startsWith('injectDrift'))).toHaveLength(1);   // 'injectDrift:target' | ':full'
+    expect(d2.deleted).toHaveLength(1);
   });
 
   dbTest('two squads in the same table never see or change each other', async () => {
@@ -209,5 +232,22 @@ describe('INC-005 live: no lock contention, persistence, separation', () => {
     await bravo.update((st) => st);
     expect((await bravo.load()).phase).toBe('new');
     expect(() => dbStore('alpha', () => ({}), 'users')).toThrow(/unknown squad table/);
+  });
+
+  dbTest('a second run on the same control plane raises a fresh alarm (an earlier run left it resolved)', async () => {
+    const state = require('../src/warroom/state');
+    await state.raiseIncident('SEV-2: old run', { incident: 'INC-005' });
+    await state.setStatus('resolved');                                        // what a completed earlier run leaves
+    await pool.query('DELETE FROM warroom_inc005_drift');
+    handles = [];
+    const d3 = createFakeDriftDriver({ account: createFakeAccount(), squad: 'alpha', squadCidrs: [NET], clock, bootSeconds: 60 });
+    drift.useDriverForTests(d3, clock, timers);
+    await drift.squad().start('alice@alpha5.test');
+    advance(60); await drift.tickOnce();                                      // ready: the stale alarm is cleared
+    expect((await request(server).get('/api/incident/status')).body).toMatchObject({ active: false, status: 'idle' });
+    advance(301); await fireDue(); await drift.tickOnce();
+    const status = (await request(server).get('/api/incident/status')).body;
+    expect(status).toMatchObject({ active: true, headline: 'SEV-2: PostureBlogging is unreachable from the squad\'s network.' });
+    expect(Date.parse(status.triggered_at)).toBeGreaterThan(Date.now() - 60e3);   // this run's alarm, not the old one
   });
 });

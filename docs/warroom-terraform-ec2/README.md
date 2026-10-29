@@ -44,6 +44,15 @@ An infrastructure change goes out through the pipeline, and the site becomes unr
 
 The squad deploys its own lab and sees it healthy. Some time later its website stops answering from the squad's network, while monitoring shows the instance itself as healthy. Nobody on the squad has changed the Terraform configuration. Squads investigate in the War Room workspace, restore the desired state through Terraform, and the platform verifies the recovery, scores it and destroys the lab — with no instructor step. Select it with `WAR_ROOM_INCIDENT=INC-005 ./warroom.sh up <n>` (a real AWS lab per squad; the operating procedure, the answer and a solved run are instructor-only, see the table above).
 
+The squad's journey, in the War Room (`http://localhost:<port>/login`, then `/lab`; the port is `8080 + <n>`, or `WARROOM_HTTP_PORT`):
+
+1. **Create an Account** and sign in; every action is recorded under your own account.
+2. **Deploy the squad lab**, and wait until the lab is shown healthy and ready (first boot takes several minutes).
+3. When the SEV-2 alert appears, investigate with the workspace's evidence views.
+4. **terraform plan (saved)**, **Inspect the saved plan**, then **terraform apply (this plan)**. The platform never applies a plan for you.
+5. The platform then verifies the recovery on its own and shows the checks and the squad's score.
+6. **Destroy the squad lab** (or let the platform do it after completion). Keep the War Room running until the lab is destroyed.
+
 ## How it works
 
 ```

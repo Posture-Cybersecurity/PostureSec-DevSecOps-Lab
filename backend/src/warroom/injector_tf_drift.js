@@ -13,6 +13,7 @@
  */
 const path = require('path');
 const config = require('./config');
+const { pool } = require('../db');
 const { getIncident, raiseIncident, setStatus } = require('./state');
 const { dbStore, ensureTables } = require('./injector_tf_ec2_live');
 
@@ -45,17 +46,32 @@ function squad() {
   const driver = injected ? injected.driver : require(path.join(SQUAD_DIR, 'driver-real')).createRealDriver({
     squad: L.squad, squadCidrs: L.squadCidrs, accountId: L.accountId, profile: L.awsProfile, allowRoot: L.allowRoot, scenario: 'drift',
   });
+  // INC-005's drift delay is fixed (5 min after verified readiness): INC-004's fuse setting does not apply.
   const initial = () => C.create(L.squad, clock(), {
-    fuseSeconds: L.fuseSeconds, graceSeconds: L.graceSeconds, maxLifetimeSeconds: L.maxLifetimeSeconds,
+    graceSeconds: L.graceSeconds, maxLifetimeSeconds: L.maxLifetimeSeconds,
   });
-  runner = driftRunner({ store: dbStore(L.squad, initial, TABLE), driver, clock });
+  runner = driftRunner({ store: dbStore(L.squad, initial, TABLE), driver, clock, onEvent: logEvent, ...(injected ? injected.timers : {}) });
   return runner;
+}
+
+/** Server log of the fuse and every injection attempt (masked); the banner follows a successful one. */
+function logEvent(event, data) {
+  const mask = (s) => String(s).replace(/\b(?:\d{1,3}\.){3}\d{1,3}(?:\/\d{1,2})?\b/g, '<ip>');
+  console.log(`[warroom] INC-005 ${L.squad} ${event} ${mask(JSON.stringify(data || {}))}`);
+  if (event === 'inject_ok') mirrorAlarm().catch((err) => console.error('[warroom] INC-005 alarm failed:', err.message));
 }
 
 /** Mirror the squad's phase onto the shared alarm row the banner reads. */
 async function mirrorAlarm() {
   const v = await squad().view();
-  const alarm = await getIncident();
+  let alarm = await getIncident();
+  // A new run on this control plane: clear an alarm an earlier run left resolved, so the incident
+  // raises a fresh one (with its own time). Only before the incident, never during it.
+  if (['booting', 'ready'].includes(v.phase) && alarm && alarm.status !== 'idle') {
+    await pool.query(`UPDATE warroom_incident SET status = 'idle', headline = NULL, triggered_at = NULL,
+        contained_at = NULL, resolved_at = NULL, evidence = '{}'::jsonb, updated_at = NOW() WHERE id = $1`, [config.incidentId]);
+    alarm = await getIncident();
+  }
   if (['incident', 'recovering'].includes(v.phase) && (!alarm || alarm.status === 'idle')) {
     await raiseIncident(HEADLINE, { incident: 'INC-005', squad: v.squad, live: true });
   } else if (v.phase === 'completed' && alarm && alarm.status === 'active') {
@@ -78,10 +94,15 @@ function startLoop() {
     tickOnce().catch((err) => console.error('[warroom] INC-005 tick failed:', err.message));
   }, L.tickSeconds * 1000);
   if (typeof loop.unref === 'function') loop.unref();
+  // A restarted control plane re-arms a pending fuse from the stored ready time at once.
+  squad().armFuse().catch((err) => console.error('[warroom] INC-005 fuse arm failed:', err.message));
   return loop;
 }
 
-function stopLoop() { if (loop) { clearInterval(loop); loop = null; } }
+function stopLoop() {
+  if (loop) { clearInterval(loop); loop = null; }
+  if (runner) runner.stop();
+}
 
 // Engine contract — the instructor's emergency controls, never the normal path.
 async function runIncident() {
@@ -92,12 +113,12 @@ async function reset() {
   return { incident: 'INC-005', live: true, reset: true, note: 'paused; the squad lab is NOT destroyed (use override destroy)', ...r };
 }
 
-/** Tests only: run against an injected (fake) driver and clock. */
-function useDriverForTests(driver, clock) {
+/** Tests only: run against an injected (fake) driver, clock and (optionally) fuse timers { schedule, cancel }. */
+function useDriverForTests(driver, clock, timers = {}) {
   if (process.env.NODE_ENV === 'production') throw new Error('useDriverForTests is not available in production');
-  injected = { driver, clock };
-  runner = null;
   stopLoop();
+  injected = { driver, clock, timers };
+  runner = null;
 }
 
 module.exports = {

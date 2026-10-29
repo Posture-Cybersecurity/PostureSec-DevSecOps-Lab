@@ -12,20 +12,37 @@ const { createFakeAccount, createFakeDriftDriver } = require('../../warroom/inc0
 const SQUAD_NET = '203.0.113.10/32';
 const T0 = Date.UTC(2026, 9, 28, 9, 0, 0);
 
+// A fake clock with fake timers: a scheduled callback runs at EXACTLY its due time as the clock advances.
 function world() {
   let t = T0;
   const account = createFakeAccount();
   const clock = () => t;
+  const handles = [];
+  const timers = {
+    schedule: (fn, ms) => { const h = { at: t + ms, fn, cancelled: false }; handles.push(h); return h; },
+    cancel: (h) => { if (h) h.cancelled = true; },
+  };
+  const pending = () => handles.filter((h) => !h.cancelled);
+  const advanceTo = async (target) => {
+    for (;;) {
+      const next = pending().filter((h) => h.at <= target).sort((a, b) => a.at - b.at)[0];
+      if (!next) break;
+      next.cancelled = true;
+      t = Math.max(t, next.at);
+      await next.fn();
+    }
+    t = Math.max(t, target);
+  };
   const squad = (id, cidrs = [SQUAD_NET], opts = {}) => {
     const driver = createFakeDriftDriver({ account, squad: id, squadCidrs: cidrs, clock, bootSeconds: 240 });
-    const store = memoryStore(C.create(id, t, { fuseSeconds: 180, graceSeconds: 0, ...opts }));
-    return { id, driver, store, r: driftRunner({ store, driver, clock }) };
+    const store = memoryStore(C.create(id, t, { graceSeconds: 0, ...opts }));
+    return { id, driver, store, r: driftRunner({ store, driver, clock, ...timers }) };
   };
-  const advance = (s) => { t += s * 1000; };
+  const advance = (sec) => advanceTo(t + sec * 1000);
   const runFor = async (squads, seconds, step = 30) => {
-    for (let i = 0; i < seconds; i += step) { advance(step); for (const s of squads) await s.r.tick(); }
+    for (let i = 0; i < seconds; i += step) { await advance(step); for (const s of squads) await s.r.tick(); }
   };
-  return { account, squad, advance, runFor, now: () => t };
+  return { account, squad, advance, runFor, now: () => t, timers, pending };
 }
 
 const phase = async (s) => (await s.r.view()).phase;
@@ -35,7 +52,7 @@ async function toIncident(w, s) {
   expect((await s.r.start('alice@squad.test')).ok).toBe(true);
   await w.runFor([s], 270);                      // boot (240 s) → ready
   expect(await phase(s)).toBe('ready');
-  await w.runFor([s], 180);                      // the fuse
+  await w.runFor([s], 300);                      // the fuse: exactly 5 min after ready
   expect(await phase(s)).toBe('incident');
 }
 
@@ -62,7 +79,7 @@ describe('the squad journey: automatic drift, Terraform restore, automatic verif
     expect(L.aws.rules.some((r) => r.id === deletedId)).toBe(false);
     await s.r.tick();                                  // the platform records the outage
     const st = await s.r.state();
-    expect(st.timeline.map((e) => e.event)).toEqual(expect.arrayContaining(['incident', 'detected']));
+    expect(st.timeline.map((e) => e.event)).toEqual(expect.arrayContaining(['inject_attempt', 'inject_result', 'alert', 'detected']));
     expect(st.last_checks.results).toMatchObject({ same_instance_healthy: true, app_reachable_from_squad: false, rule_exists_in_aws: false, plan_clean: false });
 
     for (const [m, id] of [['bob', 'http_from_squad'], ['carol', 'sg_rules'], ['alice', 'plan_now'], ['carol', 'state_rules']]) {
@@ -77,7 +94,7 @@ describe('the squad journey: automatic drift, Terraform restore, automatic verif
     expect(await phase(s)).toBe('recovering');
     expect((await s.r.apply('bob@squad.test', p.plan)).ok).toBe(false);      // a saved plan applies once
 
-    w.advance(5); await s.r.tick();
+    await w.advance(5); await s.r.tick();
     const v = await s.r.view();
     expect(v.phase).toBe('completed');
     expect(v.checks.results).toEqual({
@@ -104,7 +121,8 @@ describe('the squad journey: automatic drift, Terraform restore, automatic verif
     await restore(s);
     await s.r.tick();
     expect(JSON.stringify((await s.r.view()).timeline)).not.toContain('203.0.113.10');
-    expect((await s.r.view()).timeline.find((e) => e.event === 'incident').detail).toMatch(/tcp\/80 from <squad-network-1>/);
+    expect(JSON.stringify((await s.r.state()).timeline)).not.toContain('203.0.113.10');
+    expect((await s.r.state()).timeline.find((e) => e.event === 'inject_result').detail).toMatch(/tcp\/80 from <squad-network-1>/);
   });
 });
 
@@ -137,9 +155,9 @@ describe('injection: only after readiness, exactly once', () => {
     await s.r.start('alice@squad.test');
     await w.runFor([s], 270);
     expect(await phase(s)).toBe('ready');
-    await w.runFor([s], 120);
+    await w.runFor([s], 240);
     expect(count(s, 'injectDrift')).toBe(0);
-    await w.runFor([s], 60);
+    await w.runFor([s], 90);
     expect(count(s, 'injectDrift')).toBe(1);
   });
 
@@ -148,12 +166,13 @@ describe('injection: only after readiness, exactly once', () => {
     const s = w.squad('alpha');
     await s.r.start('alice@squad.test');
     await w.runFor([s], 270);
-    w.advance(180);
-    const others = [1, 2, 3].map(() => driftRunner({ store: s.store, driver: s.driver, clock: w.now }));
+    const others = [1, 2, 3].map(() => driftRunner({ store: s.store, driver: s.driver, clock: w.now, ...w.timers }));
+    await Promise.all(others.map((r) => r.armFuse()));                       // four fuses armed on one lab
+    await w.advance(300);
     await Promise.all([s.r.tick(), s.r.tick(), ...others.map((r) => r.tick()), ...others.map((r) => r.tick())]);
     expect(await phase(s)).toBe('incident');
-    const restarted = driftRunner({ store: s.store, driver: s.driver, clock: w.now });
-    for (let i = 0; i < 10; i += 1) { w.advance(60); await restarted.tick(); }
+    const restarted = driftRunner({ store: s.store, driver: s.driver, clock: w.now, ...w.timers });
+    for (let i = 0; i < 10; i += 1) { await w.advance(60); await restarted.tick(); }
     expect(count(s, 'injectDrift')).toBe(1);
   });
 
@@ -162,16 +181,16 @@ describe('injection: only after readiness, exactly once', () => {
     const once = w.squad('alpha');
     once.driver.failInject = 1;
     await once.r.start('alice@squad.test');
-    await w.runFor([once], 480);
+    await w.runFor([once], 600);
     expect(await phase(once)).toBe('incident');
     expect(count(once, 'injectDrift')).toBe(2);
-    expect((await once.r.state()).timeline.map((e) => e.event)).toEqual(expect.arrayContaining(['fault_retry', 'incident']));
+    expect((await once.r.state()).timeline.map((e) => e.event)).toEqual(expect.arrayContaining(['inject_failed', 'inject_result']));
 
     const w2 = world();
     const never = w2.squad('bravo', [SQUAD_NET], { failedGraceSeconds: 600 });
     never.driver.failInject = 99;
     await never.r.start('alice@squad.test');
-    await w2.runFor([never], 540);
+    await w2.runFor([never], 660);
     expect(await phase(never)).toBe('fault_failed');
     expect(count(never, 'injectDrift')).toBe(3);
     await w2.runFor([never], 600);
@@ -200,7 +219,7 @@ describe('the guarded Terraform restore', () => {
     await toIncident(w, s);
     s.driver.byHand.replaceInstance();
     expect((await s.r.plan('bob@squad.test')).ok).toBe(false);
-    w.advance(60); await s.r.tick();
+    await w.advance(60); await s.r.tick();
     const st = await s.r.state();
     expect(st.penalties.map((p) => p.reason)).toContain('instance_replaced');
     expect(st.last_checks.results.same_instance_healthy).toBe(false);
@@ -211,7 +230,7 @@ describe('the guarded Terraform restore', () => {
     const s = w.squad('alpha');
     await toIncident(w, s);
     s.driver.byHand.consoleAddRule(SQUAD_NET);
-    w.advance(60); await s.r.tick();
+    await w.advance(60); await s.r.tick();
     let st = await s.r.state();
     expect(st.last_checks.results).toMatchObject({ app_reachable_from_squad: true, rule_exists_in_aws: true, rule_managed_by_terraform: false, plan_clean: false });
     expect(st.penalties.map((p) => p.reason)).toContain('console_rule');
@@ -229,7 +248,7 @@ describe('the guarded Terraform restore', () => {
     await toIncident(w, s);
     s.driver.byHand.tamperConfig();
     await expect(s.r.plan('bob@squad.test')).rejects.toThrow(/desired configuration changed/);
-    w.advance(60); await s.r.tick();
+    await w.advance(60); await s.r.tick();
     expect((await s.r.state()).last_checks.results.rule_managed_by_terraform).toBe(false);
   });
 
@@ -250,7 +269,7 @@ describe('scoring is objective', () => {
     await toIncident(w, s);
     await s.r.evidence('bob@squad.test', 'http_from_squad');
     await s.r.evidence('carol@squad.test', 'services');                       // same group: counted once
-    w.advance(20 * 60);
+    await w.advance(20 * 60);
     await restore(s, { inspect: false });
     await s.r.tick();
     const v = await s.r.view();
@@ -294,7 +313,7 @@ describe('concurrency: read-only work never blocks the squad', () => {
     await toIncident(w, s);
     let release;
     s.driver.gate = new Promise((r) => { release = r; });
-    w.advance(60);
+    await w.advance(60);
     const check = s.r.tick();                                                  // blocks inside observe()
     await new Promise((r) => setImmediate(r));
     expect((await s.r.view()).busy).toBeNull();                                // not holding the squad lock
@@ -313,7 +332,7 @@ describe('concurrency: read-only work never blocks the squad', () => {
     await toIncident(w, s);
     let release;
     s.driver.gate = new Promise((r) => { release = r; });
-    w.advance(60);
+    await w.advance(60);
     const stale = s.r.tick();                                                  // observes the broken lab, held
     await new Promise((r) => setImmediate(r));
     s.driver.gate = null;
@@ -355,7 +374,7 @@ describe('squad isolation', () => {
     await w.runFor([alpha, bravo], 270);
     const bravoBefore = JSON.stringify(w.account.labs.bravo.aws);
     await bravo.r.override('ines', 'pause');                                   // bravo's fuse held: only alpha drifts
-    await w.runFor([alpha, bravo], 180);
+    await w.runFor([alpha, bravo], 300);
     expect(await phase(alpha)).toBe('incident');
     expect(await phase(bravo)).toBe('ready');
     expect(JSON.stringify(w.account.labs.bravo.aws)).toBe(bravoBefore);
@@ -387,5 +406,325 @@ describe('cleanup never loops and never leaves resources silently', () => {
     expect(st.timeline.at(-1).detail).toMatch(/LEFT: instance/);
     await w.runFor([s], 600, 60);
     expect((await s.r.state()).timeline.filter((e) => e.event === 'cleanup_refused')).toHaveLength(1);   // not retried in a loop
+  });
+});
+
+describe('the drift fuse: exactly 5 minutes after VERIFIED readiness, cancellable, once', () => {
+  test('no fuse exists before readiness; it is armed from the ready event and fires at exactly ready + 300 s', async () => {
+    const w = world();
+    const s = w.squad('alpha');
+    await s.r.start('alice@squad.test');
+    expect(w.pending()).toHaveLength(0);                                      // not at deploy
+    await w.runFor([s], 210);                                                 // still booting (bootSeconds 240)
+    expect(await phase(s)).toBe('booting');
+    expect(w.pending()).toHaveLength(0);                                      // not while booting
+    await w.runFor([s], 30);                                                  // ready
+    const ready = await s.r.state();
+    expect(ready.phase).toBe('ready');
+    expect(ready.fire_at).toBe(ready.ready_at + 300 * 1000);
+    expect(w.pending().map((h) => h.at)).toEqual([ready.fire_at + 5]);        // one fuse, from the ready event
+    await w.advance(299);
+    expect(count(s, 'injectDrift')).toBe(0);
+    await w.advance(1.01);                                                    // past ready + 300 s + 5 ms
+    const st = await s.r.state();
+    expect(count(s, 'injectDrift')).toBe(1);
+    expect(st.phase).toBe('incident');
+    expect(Date.parse(st.injection.at) - st.ready_at).toBe(300 * 1000 + 5);  // the fuse's own wake-up, not a tick
+    expect(st.injection.scheduled_for).toBe(new Date(ready.ready_at + 300 * 1000).toISOString());
+    expect(w.pending()).toHaveLength(0);                                      // nothing left to fire
+  });
+
+  test('member cleanup cancels the pending fuse, and a stale callback that still runs cannot inject', async () => {
+    const w = world();
+    const s = w.squad('alpha');
+    await s.r.start('alice@squad.test');
+    await w.runFor([s], 270);
+    const [fuse] = w.pending();
+    expect(fuse).toBeDefined();
+    expect((await s.r.cleanup('alice@squad.test')).ok).toBe(true);
+    expect(fuse.cancelled).toBe(true);
+    expect(w.pending()).toHaveLength(0);
+    await fuse.fn();                                                          // a race: the callback runs anyway
+    await w.advance(600);
+    expect(count(s, 'injectDrift')).toBe(0);
+    expect(await phase(s)).toBe('cleaned');
+  });
+
+  test('an instructor reset (pause) cancels the fuse; nothing fires while paused', async () => {
+    const w = world();
+    const s = w.squad('alpha');
+    await s.r.start('alice@squad.test');
+    await w.runFor([s], 270);
+    await s.r.override('ines', 'pause');
+    expect(w.pending()).toHaveLength(0);
+    await w.runFor([s], 900);
+    expect(count(s, 'injectDrift')).toBe(0);
+    expect(await phase(s)).toBe('ready');
+  });
+
+  test('an AWS failure is recorded with its reason, never reported as success, and retried 30 s later', async () => {
+    const w = world();
+    const s = w.squad('alpha');
+    s.driver.failInject = 1;
+    await s.r.start('alice@squad.test');
+    await w.runFor([s], 270);
+    const fireAt = (await s.r.state()).fire_at;
+    await w.advance(300);
+    let st = await s.r.state();
+    expect(st.phase).toBe('ready');
+    expect(st.injection).toBeNull();
+    expect(st.timeline.filter((e) => e.internal).map((e) => e.event)).toEqual(['inject_prepared', 'inject_attempt', 'inject_failed', 'target_discarded']);
+    expect(st.drift_target).toBeNull();                                       // the retry re-resolves everything
+    expect(st.timeline.find((e) => e.event === 'inject_failed').detail).toMatch(/simulated AWS error/);
+    expect((await s.r.view()).timeline.some((e) => /inject|fault/.test(e.event))).toBe(false);   // not shown to the squad
+    expect(w.pending().map((h) => h.at)).toEqual([fireAt + 5 + 30000]);
+    await w.advance(30);
+    st = await s.r.state();
+    expect(st.phase).toBe('incident');
+    expect(count(s, 'injectDrift')).toBe(2);
+  });
+
+  test('a fuse blocked by a running Terraform step is deferred, not lost and not doubled', async () => {
+    const w = world();
+    const s = w.squad('alpha');
+    await s.r.start('alice@squad.test');
+    await w.runFor([s], 270);
+    await s.store.update((st) => { st.op = { kind: 'override', by: 'instructor:ines', since: w.now(), until: w.now() + 3600e3 }; return st; });
+    await w.advance(300);
+    expect(count(s, 'injectDrift')).toBe(0);
+    expect(w.pending()).toHaveLength(1);                                      // re-armed for a retry
+    await s.store.update((st) => { st.op = null; return st; });
+    await w.advance(30);
+    expect(count(s, 'injectDrift')).toBe(1);
+  });
+
+  test('the overdue safety net: a control plane that missed the fuse (restart) still injects exactly once', async () => {
+    const w = world();
+    const s = w.squad('alpha');
+    await s.r.start('alice@squad.test');
+    await w.runFor([s], 270);
+    for (const h of w.pending()) w.timers.cancel(h);                          // the process died with its timer
+    const restarted = driftRunner({ store: s.store, driver: s.driver, clock: w.now, schedule: () => null, cancel: () => {} });   // its timer never fires
+    for (let i = 0; i < 20; i += 1) { await w.advance(30); await restarted.tick(); }
+    expect(count(s, 'injectDrift')).toBe(1);
+    restarted.stop();
+  });
+});
+
+describe('what the squad sees: the symptom, never the mechanism or the answer', () => {
+  test('during the incident the view shows an alert and no injection records, no checks, no rule id', async () => {
+    const w = world();
+    const s = w.squad('alpha');
+    await toIncident(w, s);
+    await s.r.tick();                                                         // the platform's first check
+    const v = await s.r.view();
+    const st = await s.r.state();
+    expect(v.timeline.map((e) => e.event)).toEqual(['deploy_plan', 'deployed', 'ready', 'alert', 'detected']);
+    expect(v.timeline.find((e) => e.event === 'alert').detail).toBe('SEV-2: PostureBlogging is unreachable from the squad\'s network');
+    expect(JSON.stringify(v)).not.toContain(st.injection.rule_id);
+    expect(JSON.stringify(v.timeline)).not.toMatch(/inject|script|automat|platform deleted/i);
+    expect(v.checks).toBeNull();                                              // they would name the answer
+    expect(st.timeline.some((e) => e.internal && e.event === 'checks')).toBe(true);   // instructor record keeps them
+  });
+
+  test('after the squad applies its fix, the checks become visible', async () => {
+    const w = world();
+    const s = w.squad('alpha');
+    await toIncident(w, s);
+    await restore(s);
+    await s.r.tick();
+    const v = await s.r.view();
+    expect(v.phase).toBe('completed');
+    expect(Object.values(v.checks.results).every(Boolean)).toBe(true);
+  });
+});
+
+describe("the timeline records a check result only when it changes", () => {
+  test("unchanged results stored with reordered keys (as Postgres JSONB does) add no new entry", async () => {
+    const w = world();
+    const s = w.squad("alpha");
+    await toIncident(w, s);
+    const count0 = (await s.r.state()).timeline.filter((e) => e.event === "checks").length;
+    expect(count0).toBe(1);
+    await s.store.update((st) => {                                            // JSONB-style key order
+      const r = st.last_checks.results;
+      st.last_checks.results = Object.fromEntries(Object.keys(r).sort((a, b) => a.length - b.length || (a < b ? -1 : 1)).map((k) => [k, r[k]]));
+      return st;
+    });
+    await w.runFor([s], 180);
+    expect((await s.r.state()).timeline.filter((e) => e.event === "checks").length).toBe(1);
+  });
+});
+
+describe("no second fuse while an injection is in flight (seen in the 2026-10-28 live run)", () => {
+  test("a tick during a slow injection neither arms another fuse nor injects again", async () => {
+    const w = world();
+    const s = w.squad("alpha");
+    await s.r.start("alice@squad.test");
+    await w.runFor([s], 270);
+    const slow = s.driver.injectDrift;
+    let release;
+    s.driver.injectDrift = async () => { await new Promise((r) => { release = r; }); return slow(); };
+    const firing = w.advance(300);                                            // the fuse fires; injection blocks
+    for (let i = 0; i < 20 && !release; i += 1) await new Promise((r) => setImmediate(r));
+    expect((await s.r.state()).op).toMatchObject({ kind: "inject" });
+    await s.r.tick();                                                         // the platform tick meanwhile
+    expect(w.pending()).toHaveLength(0);                                      // no duplicate fuse
+    release();
+    await firing;
+    expect(await phase(s)).toBe("incident");
+    expect(count(s, "injectDrift")).toBe(1);
+    expect(w.pending()).toHaveLength(0);
+  });
+});
+
+describe('the drift target is prepared while healthy; the deadline only re-checks and revokes', () => {
+  const readyLab = async (w, s) => { await s.r.start('alice@squad.test'); await w.runFor([s], 270); expect(await phase(s)).toBe('ready'); };
+
+  test('prepared once, right after readiness, recorded for the instructor only; the fuse uses it (fast path)', async () => {
+    const w = world();
+    const s = w.squad('alpha');
+    await readyLab(w, s);
+    await w.runFor([s], 60);
+    let st = await s.r.state();
+    expect(st.drift_target).toMatchObject({ sg: 'sg-alpha', rule_id: expect.stringMatching(/^sgr-/), cidr: SQUAD_NET });
+    expect(count(s, 'prepareDrift')).toBe(1);
+    expect(st.timeline.find((e) => e.event === 'inject_prepared').internal).toBe(true);
+    expect((await s.r.view()).timeline.some((e) => /prepar|inject/.test(e.event))).toBe(false);
+    const target = st.drift_target.rule_id;
+    await w.runFor([s], 240);                                                  // past the fuse
+    st = await s.r.state();
+    expect(st.phase).toBe('incident');
+    expect(s.driver.calls).toContain('injectDrift:target');
+    expect(st.injection).toMatchObject({ path: 'fast', rule_id: target });
+    expect(s.driver.deleted).toEqual([target]);                               // exactly that rule, once
+    expect(count(s, 'prepareDrift')).toBe(1);
+  });
+
+  test('never prepared within the cutoff before the fuse: a lab whose fuse is that close uses the full path', async () => {
+    const w = world();
+    const s = w.squad('alpha', [SQUAD_NET], { fuseSeconds: 50 });              // fires < 60 s after ready
+    await readyLab(w, s);
+    await w.runFor([s], 60);
+    expect(count(s, 'prepareDrift')).toBe(0);
+    expect(s.driver.calls).toContain('injectDrift:full');
+    expect((await s.r.state()).injection.path).toBe('full');
+  });
+
+  test('a prepared rule that changed in AWS is refused (nothing deleted), discarded, and the full path refuses too', async () => {
+    const w = world();
+    const s = w.squad('alpha', [SQUAD_NET], { failedGraceSeconds: 600 });
+    await readyLab(w, s);
+    await w.runFor([s], 60);
+    s.driver.byHand.tamperRule();
+    await w.runFor([s], 330);
+    const st = await s.r.state();
+    expect(s.driver.deleted).toEqual([]);
+    expect(st.phase).toBe('fault_failed');
+    expect(st.timeline.filter((e) => e.event === 'inject_failed')[0].detail).toMatch(/no longer matches this squad's tcp\/80 rule; nothing deleted/);
+    expect(s.driver.calls.filter((c) => c === 'injectDrift:target')).toHaveLength(1);   // the cached target is used once
+  });
+
+  test('a prepared rule already gone (an earlier attempt, then a crash): the full path reports it, nothing else is deleted', async () => {
+    const w = world();
+    const s = w.squad('alpha');
+    await readyLab(w, s);
+    await w.runFor([s], 60);
+    s.driver.byHand.vanishRule();
+    await w.runFor([s], 240);
+    const st = await s.r.state();
+    expect(st.phase).toBe('incident');
+    expect(st.injection).toMatchObject({ path: 'full', retried: true });
+    expect(s.driver.deleted).toEqual([]);
+  });
+
+  test('an AWS error on the fast path: recorded, target discarded, the 30 s retry re-resolves and succeeds', async () => {
+    const w = world();
+    const s = w.squad('alpha');
+    await readyLab(w, s);
+    await w.runFor([s], 60);
+    s.driver.failInject = 1;
+    await w.runFor([s], 270);
+    const st = await s.r.state();
+    expect(st.phase).toBe('incident');
+    expect(s.driver.calls.filter((c) => c.startsWith('injectDrift'))).toEqual(['injectDrift:target', 'injectDrift:full']);
+    expect(st.injection.path).toBe('full');
+    expect(s.driver.deleted).toHaveLength(1);
+  });
+
+  test('a failing preparation is retried while time allows (logged at most 3 times); the fuse still injects (full path)', async () => {
+    const w = world();
+    const s = w.squad('alpha');
+    s.driver.failPrepare = 99;
+    await readyLab(w, s);
+    await w.runFor([s], 300);
+    const st = await s.r.state();
+    expect(st.phase).toBe('incident');
+    expect(st.injection.path).toBe('full');
+    expect(st.timeline.filter((e) => e.event === 'prepare_failed').length).toBe(3);
+    expect(count(s, 'prepareDrift')).toBeGreaterThan(3);
+  });
+
+  test('a preparation that finishes after a cleanup is discarded; no injection follows', async () => {
+    const w = world();
+    const s = w.squad('alpha');
+    await s.r.start('alice@squad.test');
+    await w.runFor([s], 240);                                                  // ready on this tick; not yet prepared
+    expect(await phase(s)).toBe('ready');
+    expect(count(s, 'prepareDrift')).toBe(0);
+    let release;
+    s.driver.prepareGate = new Promise((r) => { release = r; });
+    await w.advance(30);
+    const t = s.r.tick();                                                      // preparing, held
+    for (let i = 0; i < 20 && count(s, 'prepareDrift') === 0; i += 1) await new Promise((r) => setImmediate(r));
+    expect(count(s, 'prepareDrift')).toBe(1);
+    expect((await s.r.cleanup('alice@squad.test')).ok).toBe(true);
+    release();
+    await t;
+    await w.advance(600);
+    const st = await s.r.state();
+    expect(st.phase).toBe('cleaned');
+    expect(st.drift_target).toBeNull();
+    expect(count(s, 'injectDrift')).toBe(0);
+  });
+
+  test('a restarted control plane keeps the prepared target and the exact fuse; injects once, fast', async () => {
+    const w = world();
+    const s = w.squad('alpha');
+    await readyLab(w, s);
+    await w.runFor([s], 60);
+    s.r.stop();                                                                // the old process dies
+    for (const h of w.pending()) w.timers.cancel(h);
+    const restarted = driftRunner({ store: s.store, driver: s.driver, clock: w.now, ...w.timers });
+    await restarted.armFuse();
+    const fireAt = (await s.store.load()).fire_at;
+    expect(w.pending().map((h) => h.at)).toEqual([fireAt + 5]);
+    await w.advance(240);
+    const st = await s.store.load();
+    expect(st.injection).toMatchObject({ path: 'fast' });
+    expect(Date.parse(st.injection.at)).toBe(fireAt + 5);
+    expect(s.driver.deleted).toHaveLength(1);
+  });
+});
+
+describe('injection latency record (instructor-only)', () => {
+  test('the driver\'s timing marks become an internal breakdown relative to the scheduled fire time', async () => {
+    const w = world();
+    const s = w.squad('alpha');
+    const real = s.driver.injectDrift;
+    s.driver.injectDrift = async (t) => {
+      const r = await real(t);
+      const f = (await s.store.load()).fire_at;
+      return { ...r, timing: { spawned: f + 30, script_start: f + 60, checked: f + 2500, revoke_start: f + 2510, revoke_done: f + 4000, returned: f + 6500 } };
+    };
+    await s.r.start('alice@squad.test');
+    await w.runFor([s], 570);
+    const st = await s.r.state();
+    expect(st.phase).toBe('incident');
+    expect(st.injection.timing_ms).toEqual({ op_start: 5, spawned: 30, script_start: 60, checked: 2500, revoke_start: 2510, revoke_done: 4000, returned: 6500 });
+    const e = st.timeline.find((x) => x.event === 'inject_timing');
+    expect(e.internal).toBe(true);
+    expect(e.detail).toMatch(/revoke_start \+2510ms, revoke_done \+4000ms/);
+    expect(JSON.stringify(await s.r.view())).not.toMatch(/timing|revoke_start/);
   });
 });

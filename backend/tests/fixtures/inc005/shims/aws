@@ -1,8 +1,22 @@
 #!/usr/bin/env bash
 # Fake AWS CLI for squad-lab.sh drift tests. The "live" security group rule disappears once revoked.
+# A revoke given --group-id file:///dev/stdin waits for its input like the real CLI (logged
+# STARTED); once the input arrives it is logged as the request it becomes. Killed while waiting:
+# no request. EMPTY input is the worst case: the request IS sent, with an empty group id.
+if [ "$1 $2" = "ec2 revoke-security-group-ingress" ]; then
+  if [ "$3 $4" = "--group-id file:///dev/stdin" ]; then
+    echo "STARTED ec2 revoke, waiting for its group on stdin" >> "$SHIM_LOG"
+    [ -n "${FAKE_REVOKE_STARTUP:-}" ] && sleep "$FAKE_REVOKE_STARTUP"    # the CLI's own start-up
+    g="$(cat)"
+    set -- ec2 revoke-security-group-ingress --group-id "$g" "${@:5}"
+  else
+    [ -n "${FAKE_REVOKE_STARTUP:-}" ] && sleep "$FAKE_REVOKE_STARTUP"
+  fi
+fi
 echo "aws $*" >> "$SHIM_LOG"
 case "$1 $2" in
-  "sts get-caller-identity") printf '{"Account":"%s","Arn":"%s"}\n' "$FAKE_ACCOUNT" "$FAKE_ARN" ;;
+  "sts get-caller-identity") [ -n "${FAKE_STS_SLEEP:-}" ] && sleep "$FAKE_STS_SLEEP"
+                             printf '{"Account":"%s","Arn":"%s"}\n' "$FAKE_ACCOUNT" "$FAKE_ARN" ;;
   "ssm get-parameter") echo "${FAKE_AMI:-ami-0123456789abcdef0}" ;;
   "ec2 describe-security-groups")
     case "$*" in
@@ -12,11 +26,17 @@ case "$1 $2" in
   "ec2 describe-security-group-rules")
     gone=false; [ -f "$REVOKED" ] || [ -n "${FAKE_RULE_ABSENT:-}" ] && gone=true
     case "$*" in
+      *--security-group-rule-ids*)   # read one rule by id, as the fast path does (rule tags included)
+        if $gone; then echo "An error occurred (InvalidSecurityGroupRuleId.NotFound) when calling the DescribeSecurityGroupRules operation" >&2; exit 254; fi
+        [ -n "${FAKE_DESCRIBE_ERROR:-}" ] && { echo "An error occurred (RequestLimitExceeded) when calling the DescribeSecurityGroupRules operation" >&2; exit 254; }
+        printf '{"SecurityGroupRules":[{"SecurityGroupRuleId":"sgr-0aaaaaaaaaaaaaaaa","GroupId":"%s","IsEgress":%s,"IpProtocol":"tcp","FromPort":%s,"ToPort":%s,"CidrIpv4":"%s","Tags":[{"Key":"WarRoom","Value":"%s"},{"Key":"WarRoomSquad","Value":"%s"}]}]}\n' \
+          "${FAKE_RULE_GROUP:-sg-0bbbbbbbbbbbbbbbb}" "${FAKE_RULE_EGRESS:-false}" "${FAKE_RULE_PORT:-80}" "${FAKE_RULE_PORT:-80}" "${FAKE_RULE_CIDR:-203.0.113.10/32}" "${FAKE_RULE_INCIDENT:-INC-005}" "${FAKE_RULE_SQUAD:-alpha}" ;;
       *length\(*) if $gone; then echo 0; else echo 1; fi ;;
       *) if $gone; then echo '[]'; else
            printf '[{"SecurityGroupRuleId":"sgr-0aaaaaaaaaaaaaaaa","IsEgress":false,"IpProtocol":"tcp","FromPort":%s,"ToPort":%s,"CidrIpv4":"203.0.113.10/32"}]\n' "${FAKE_RULE_PORT:-80}" "${FAKE_RULE_PORT:-80}"
          fi ;;
     esac ;;
-  "ec2 revoke-security-group-ingress") : > "$REVOKED" ;;
+  "ec2 revoke-security-group-ingress") [ -n "${FAKE_REVOKE_ERROR:-}" ] && { echo "An error occurred (UnauthorizedOperation)" >&2; exit 254; }
+                                       : > "$REVOKED" ;;
   *) : ;;
 esac

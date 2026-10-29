@@ -24,7 +24,9 @@
 const S = require('./scenario-drift');
 
 const DEFAULTS = {
-  fuseSeconds: 180,            // healthy lab visible to the squad this long before the drift
+  fuseSeconds: 300,            // the drift happens exactly 5 min after the VERIFIED ready event (runner fuse timer)
+  lateInjectSeconds: 60,       // the tick injects only if the fuse timer is this overdue (e.g. a restart)
+  prepareCutoffSeconds: 60,    // resolve the drift target only until this long before the fuse (never racing it)
   bootTimeoutSeconds: 1200,
   checkEverySeconds: 60,       // verification cadence during the incident (immediately after an apply)
   graceSeconds: 900,           // cleanup this long after completion (0 = only on request)
@@ -49,6 +51,7 @@ function create(squadId, nowMs, opts = {}) {
     rev: 0,                    // bumped by every AWS/Terraform mutation; read-only results carry it
     created_at: nowMs, deployed_at: null, ready_at: null, fire_at: null, fired_at: null,
     inject_attempts: 0, injection: null,   // { rule_id, cidr, at }
+    drift_target: null, prepare_failures: 0, // { sg, rule_id, cidr, prepared_at } resolved while healthy
     incident_at: null, detected_at: null, failed_at: null,
     paused: false, recovered_at: null, completed_at: null, cleaned_at: null,
     instance_id: null,
@@ -67,6 +70,10 @@ function create(squadId, nowMs, opts = {}) {
 
 function log(st, nowMs, by, event, detail) {
   st.timeline.push({ t: iso(nowMs), by, event, detail: String(detail || '').slice(0, 300) });
+}
+// Instructor-only record (debrief): never in the squad's view, which must not reveal the mechanism or the answer.
+function logInternal(st, nowMs, event, detail) {
+  st.timeline.push({ t: iso(nowMs), by: 'platform', event, detail: String(detail || '').slice(0, 300), internal: true });
 }
 
 function penalize(st, reason) {
@@ -206,7 +213,14 @@ function due(st, nowMs) {
     return !st.paused && st.failed_at && sec(nowMs - st.failed_at) >= o.failedGraceSeconds ? 'failed' : null;
   }
   if (st.phase === 'booting') return 'readiness';
-  if (st.phase === 'ready') return !st.paused && nowMs >= st.fire_at ? 'inject' : null;
+  // The runner's fuse timer injects on time; the tick only rescues an overdue fuse (e.g. after a restart).
+  if (st.phase === 'ready') {
+    if (st.paused) return null;
+    if (nowMs >= st.fire_at + o.lateInjectSeconds * 1000) return 'inject';
+    // Resolve the target while healthy, so the deadline's critical path is one live check + the revoke.
+    if (!st.drift_target && !st.injection && nowMs < st.fire_at - (o.prepareCutoffSeconds || 0) * 1000) return 'prepare';
+    return null;
+  }
   if (FIXABLE.includes(st.phase)) return nowMs >= (st.check_due || 0) ? 'check' : null;
   if (st.phase === 'completed' && !st.paused && o.graceSeconds > 0 && sec(nowMs - st.completed_at) >= o.graceSeconds) return 'grace';
   return null;
@@ -229,29 +243,54 @@ function commitReadiness(st, obs, nowMs, rev) {
   return st.phase;
 }
 
+/** Commit a prepared drift target (resolved outside the lock). Stale results are discarded. */
+function commitPrepared(st, r, nowMs, rev, mask = MASK) {
+  if (st.phase !== 'ready' || st.injection || st.drift_target || st.rev !== rev) return st.phase;
+  if (r && r.ok) {
+    st.drift_target = { sg: r.sg, rule_id: r.ruleId, cidr: r.cidr, prepared_at: iso(nowMs) };
+    logInternal(st, nowMs, 'inject_prepared', `target ${r.ruleId} (tcp/80 from ${mask(r.cidr)}) in ${r.sg}, resolved from state and checked live`);
+  } else {
+    st.prepare_failures = (st.prepare_failures || 0) + 1;
+    if (st.prepare_failures <= 3) logInternal(st, nowMs, 'prepare_failed', `${mask((r && r.summary) || 'unknown')}; the fuse will use the full path`);
+  }
+  return st.phase;
+}
+
 /** Inject the drift (under the lock). Never before readiness, at most once. */
 async function inject(st, driver, nowMs) {
   if (st.phase !== 'ready' || st.injection || st.paused || nowMs < st.fire_at) return st.phase;
   const mask = driver.mask || MASK;
+  const late = sec(nowMs - st.fire_at);
   st.fired_at = st.fired_at || nowMs;
   st.inject_attempts += 1;
   st.rev += 1;
+  const target = st.drift_target ? { sg: st.drift_target.sg, ruleId: st.drift_target.rule_id, cidr: st.drift_target.cidr } : undefined;
+  logInternal(st, nowMs, 'inject_attempt', `attempt ${st.inject_attempts}/${st.opts.maxInjectAttempts}; scheduled ${iso(st.fire_at)} (ready + ${st.opts.fuseSeconds}s), started ${late}s after; ${target ? `prepared target ${target.ruleId}` : 'no prepared target: full path'}`);
   let r;
-  try { r = await driver.injectDrift(); } catch (e) { r = { deleted: false, summary: e.message }; }
+  try { r = await driver.injectDrift(target); } catch (e) { r = { deleted: false, summary: e.message }; }
   if (r.deleted) {
-    st.injection = { rule_id: r.ruleId, cidr: r.cidr, at: iso(nowMs), retried: Boolean(r.already) };
+    st.injection = { rule_id: r.ruleId, cidr: r.cidr, scheduled_for: iso(st.fire_at), at: iso(nowMs), path: r.path || 'full', retried: Boolean(r.already) };
     st.phase = 'incident';
     st.incident_at = nowMs;
     st.check_due = nowMs;                     // record the outage evidence on the next tick
-    log(st, nowMs, 'platform', 'incident', `HOTFIX-311: an engineer deleted security group rule ${r.ruleId} (tcp/80 from ${mask(r.cidr)}) directly in AWS, outside Terraform`);
+    logInternal(st, nowMs, 'inject_result', `deleted security group rule ${r.ruleId} (tcp/80 from ${mask(r.cidr)}) through the AWS API, ${r.path || 'full'} path${r.already ? ' (already absent on retry)' : ''}`);
+    if (r.timing) {
+      // Latency, measured from the scheduled fire time (ms): where the time to the AWS mutation goes.
+      const at = (k) => (typeof r.timing[k] === 'number' ? r.timing[k] - st.fire_at : null);
+      st.injection.timing_ms = { op_start: nowMs - st.fire_at, spawned: at('spawned'), script_start: at('script_start'), checked: at('checked'), revoke_start: at('revoke_start'), revoke_done: at('revoke_done'), returned: at('returned') };
+      logInternal(st, nowMs, 'inject_timing', Object.entries(st.injection.timing_ms).map(([k, v]) => `${k} +${v}ms`).join(', '));
+    }
+    // What the squad sees: the symptom only. The scenario is an engineer's console hotfix.
+    log(st, nowMs, 'platform', 'alert', 'SEV-2: PostureBlogging is unreachable from the squad\'s network');
     return st.phase;
   }
+  logInternal(st, nowMs, 'inject_failed', mask(r.summary));
+  // Never retry a target that just failed: the next attempt re-resolves everything (full path).
+  if (target) { st.drift_target = null; logInternal(st, nowMs, 'target_discarded', `prepared target ${target.ruleId} not used again`); }
   if (st.inject_attempts >= st.opts.maxInjectAttempts) {
     st.phase = 'fault_failed';
     st.failed_at = nowMs;
-    log(st, nowMs, 'platform', 'fault_failed', mask(r.summary));
-  } else {
-    log(st, nowMs, 'platform', 'fault_retry', mask(r.summary));
+    log(st, nowMs, 'platform', 'fault_failed', 'the exercise could not start; the platform will clean up the lab');
   }
   return st.phase;
 }
@@ -262,7 +301,8 @@ function commitCheck(st, obs, nowMs, rev) {
   st.check_due = nowMs + st.opts.checkEverySeconds * 1000;
   for (const p of S.penaltiesFrom(obs, st)) penalize(st, p);
   const results = S.checks(obs, st);
-  const changed = !st.last_checks || JSON.stringify(st.last_checks.results) !== JSON.stringify(results);
+  // Per key, not JSON text: Postgres JSONB reorders stored keys, which made every check look "changed".
+  const changed = !st.last_checks || Object.keys(results).some((k) => st.last_checks.results[k] !== results[k]);
   st.last_checks = { at: iso(nowMs), results };
   if (!st.detected_at && !results.app_reachable_from_squad && results.same_instance_healthy) {
     st.detected_at = nowMs;
@@ -277,7 +317,9 @@ function commitCheck(st, obs, nowMs, rev) {
     log(st, nowMs, 'platform', 'verified', `all ${passed} recovery checks passed: ${Object.keys(results).join(', ')}`);
     log(st, nowMs, 'platform', 'completed', `squad score ${st.score.total}/100`);
   } else if (changed) {
-    log(st, nowMs, 'platform', 'checks', `${passed}/${Object.keys(results).length} pass; failing: ${Object.keys(results).filter((k) => !results[k]).join(', ') || 'none'}`);
+    const text = `${passed}/${Object.keys(results).length} pass; failing: ${Object.keys(results).filter((k) => !results[k]).join(', ') || 'none'}`;
+    // Before the squad's own apply the failing checks would name the answer: instructor-only until then.
+    if (st.phase === 'incident') logInternal(st, nowMs, 'checks', text); else log(st, nowMs, 'platform', 'checks', text);
   }
   return st.phase;
 }
@@ -310,5 +352,5 @@ function score(st) {
 
 module.exports = {
   create, start, plan, apply, cleanup, override, recordEvidence, recordInspection,
-  due, commitReadiness, inject, commitCheck, score, DEFAULTS, INVESTIGABLE, FIXABLE,
+  due, commitReadiness, commitPrepared, inject, commitCheck, score, DEFAULTS, INVESTIGABLE, FIXABLE,
 };

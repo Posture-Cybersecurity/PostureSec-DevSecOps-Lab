@@ -99,7 +99,7 @@ describe('inject-drift: the real Terraform-managed rule, through the AWS API, ex
     const before = fs.readFileSync(desired(), 'utf8');
     const r = run(['inject-drift']);
     const calls = r.shim.slice(prior).trim().split('\n');
-    expect(r.out).toMatch(/^DRIFT DELETED sgr-0aaaaaaaaaaaaaaaa 203\.0\.113\.10\/32$/m);
+    expect(r.out).toMatch(/^DRIFT DELETED sgr-0aaaaaaaaaaaaaaaa 203\.0\.113\.10\/32 full$/m);
     expect(calls.filter((l) => /revoke-security-group-ingress/.test(l))).toEqual([
       'aws ec2 revoke-security-group-ingress --group-id sg-0bbbbbbbbbbbbbbbb --security-group-rule-ids sgr-0aaaaaaaaaaaaaaaa',
     ]);
@@ -111,7 +111,7 @@ describe('inject-drift: the real Terraform-managed rule, through the AWS API, ex
   test('idempotent: a retry after the rule is already gone deletes nothing more', () => {
     deployed();
     const r = run(['inject-drift'], { FAKE_RULE_ABSENT: '1' });
-    expect(r.out).toMatch(/^DRIFT DELETED sgr-0aaaaaaaaaaaaaaaa 203\.0\.113\.10\/32 already-absent$/m);
+    expect(r.out).toMatch(/^DRIFT DELETED sgr-0aaaaaaaaaaaaaaaa 203\.0\.113\.10\/32 already-absent full$/m);
     expect(r.shim).not.toMatch(/revoke-security-group-ingress/);
   });
 
@@ -140,5 +140,144 @@ describe('inject-drift: the real Terraform-managed rule, through the AWS API, ex
 
   test('refused before the lab is deployed (no desired configuration yet)', () => {
     expect(run(['inject-drift']).err).toMatch(/REFUSED: the desired configuration changed since deployment/);
+  });
+});
+
+describe('prepare-drift (while healthy) and the fast inject path (at the deadline)', () => {
+  const TARGET = ['sg-0bbbbbbbbbbbbbbbb', 'sgr-0aaaaaaaaaaaaaaaa', '203.0.113.10/32'];
+  const since = (r, prior) => r.shim.slice(prior).trim().split('\n').filter(Boolean);
+
+  test('prepare-drift resolves the state rule, checks it live, prints the target, and changes nothing', () => {
+    const prior = deployed().shim.length;
+    const r = run(['prepare-drift']);
+    expect(r.out).toMatch(/^TARGET sg-0bbbbbbbbbbbbbbbb sgr-0aaaaaaaaaaaaaaaa 203\.0\.113\.10\/32$/m);
+    const calls = since(r, prior);
+    expect(calls.some((l) => /terraform .* show -json/.test(l))).toBe(true);
+    expect(calls.some((l) => /describe-security-groups --group-ids/.test(l))).toBe(true);
+    expect(calls.some((l) => /revoke-security-group-ingress/.test(l))).toBe(false);
+  });
+
+  test('prepare-drift refuses when the rule is already gone, or the group is not this squad\'s', () => {
+    deployed();
+    expect(run(['prepare-drift'], { FAKE_RULE_ABSENT: '1' }).out).toMatch(/^DRIFT REFUSED the squad's rule is not present in AWS/m);
+    expect(run(['prepare-drift'], { FAKE_SG_SQUAD: 'bravo' }).out).toMatch(/^DRIFT REFUSED the security group is not tagged WarRoomSquad=alpha/m);
+  });
+
+  test('fast path: no Terraform at all; identity + a live read of that one rule, then exactly one revoke', () => {
+    const prior = deployed().shim.length;
+    const r = run(['inject-drift', ...TARGET]);
+    expect(r.out).toMatch(/^DRIFT DELETED sgr-0aaaaaaaaaaaaaaaa 203\.0\.113\.10\/32 fast$/m);
+    const calls = since(r, prior);
+    expect(calls.filter((l) => l.startsWith('terraform'))).toEqual([]);
+    expect(calls).toEqual(expect.arrayContaining([
+      'aws sts get-caller-identity --output json',
+      'aws ec2 describe-security-group-rules --security-group-rule-ids sgr-0aaaaaaaaaaaaaaaa --output json',
+    ]));
+    expect(calls.filter((l) => /revoke-security-group-ingress/.test(l))).toEqual([
+      'aws ec2 revoke-security-group-ingress --group-id sg-0bbbbbbbbbbbbbbbb --security-group-rule-ids sgr-0aaaaaaaaaaaaaaaa',
+    ]);
+  });
+
+  test('the identity guard still runs on the fast path: another account deletes nothing', () => {
+    deployed();
+    const r = run(['inject-drift', ...TARGET], { FAKE_ACCOUNT: '999999999999' });
+    expect(r.err).toMatch(/REFUSED: caller account \*{8}9999 is not the expected lab account/);
+    expect(r.shim).not.toMatch(/revoke-security-group-ingress/);
+  });
+
+  test('a prepared target that no longer matches in any way is refused, and nothing is deleted', () => {
+    deployed();
+    for (const env of [
+      { FAKE_RULE_GROUP: 'sg-0ccccccccccccccc' }, { FAKE_RULE_EGRESS: 'true' }, { FAKE_RULE_PORT: '22' },
+      { FAKE_RULE_CIDR: '203.0.113.11/32' }, { FAKE_RULE_SQUAD: 'bravo' }, { FAKE_RULE_INCIDENT: 'INC-004' },
+    ]) {
+      const r = run(['inject-drift', ...TARGET], env);
+      expect(r.out).toMatch(/^DRIFT REFUSED the prepared target sgr-0aaaaaaaaaaaaaaaa no longer matches .*nothing deleted$/m);
+      expect(r.shim).not.toMatch(/revoke-security-group-ingress/);
+    }
+  });
+
+  test('a target outside the approved CIDRs, or malformed, is refused before any AWS call', () => {
+    const prior = deployed().shim.length;
+    const bad = run(['inject-drift', 'sg-0bbbbbbbbbbbbbbbb', 'sgr-0aaaaaaaaaaaaaaaa', '198.18.0.1/32']);
+    expect(bad.err).toMatch(/REFUSED: inject-drift: the target CIDR is not one of the squad's approved addresses/);
+    expect(since(bad, prior)).toEqual([]);
+    expect(run(['inject-drift', 'sg-x', 'sgr-0aaaaaaaaaaaaaaaa', '203.0.113.10/32']).err).toMatch(/REFUSED: inject-drift: malformed target/);
+  });
+
+  test('the prepared rule no longer exists: the full path decides (already absent), nothing else is deleted', () => {
+    const prior = deployed().shim.length;
+    const r = run(['inject-drift', ...TARGET], { FAKE_RULE_ABSENT: '1' });
+    expect(r.out).toMatch(/^DRIFT DELETED sgr-0aaaaaaaaaaaaaaaa 203\.0\.113\.10\/32 already-absent full$/m);
+    expect(since(r, prior).some((l) => /terraform .* show -json/.test(l))).toBe(true);    // re-resolved from state
+    expect(r.shim).not.toMatch(/revoke-security-group-ingress/);
+  });
+
+  test('AWS API errors are reported as failures, never as a deletion', () => {
+    deployed();
+    const d = run(['inject-drift', ...TARGET], { FAKE_DESCRIBE_ERROR: '1' });
+    expect(d.out).toMatch(/^DRIFT FAILED describe-security-group-rules sgr-0aaaaaaaaaaaaaaaa: .*RequestLimitExceeded/m);
+    expect(d.shim).not.toMatch(/revoke-security-group-ingress/);
+    const v = run(['inject-drift', ...TARGET], { FAKE_REVOKE_ERROR: '1' });
+    expect(v.out).toMatch(/^DRIFT FAILED revoke-security-group-ingress sgr-0aaaaaaaaaaaaaaaa$/m);
+    expect(v.out).not.toMatch(/DRIFT DELETED/);
+  });
+
+  test('the full path (no target) still works and says so', () => {
+    deployed();
+    expect(run(['inject-drift']).out).toMatch(/^DRIFT DELETED sgr-0aaaaaaaaaaaaaaaa 203\.0\.113\.10\/32 full$/m);
+  });
+});
+
+describe('fast path timing marks', () => {
+  test('the fast path reports ordered wall-clock marks around the one revoke', () => {
+    const r = (() => { deployed(); return run(['inject-drift', 'sg-0bbbbbbbbbbbbbbbb', 'sgr-0aaaaaaaaaaaaaaaa', '203.0.113.10/32']); })();
+    const m = r.out.match(/^TIMING script_start=(\d+) checked=(\d+) revoke_start=(\d+) revoke_done=(\d+)$/m);
+    expect(m).not.toBeNull();
+    const [a, b, c, d] = m.slice(1).map(Number);
+    expect(a).toBeGreaterThan(1.7e12);                                        // real epoch milliseconds
+    expect(a <= b && b <= c && c <= d).toBe(true);
+    expect(r.out).toMatch(/^DRIFT DELETED sgr-0aaaaaaaaaaaaaaaa 203\.0\.113\.10\/32 fast$/m);
+  });
+});
+
+describe('fast path: the revoke CLI starts with the checks, but is gated on them', () => {
+  const TARGET = ['sg-0bbbbbbbbbbbbbbbb', 'sgr-0aaaaaaaaaaaaaaaa', '203.0.113.10/32'];
+  const STARTED = /^STARTED ec2 revoke, waiting for its group on stdin$/gm;
+
+  test('every refusal or failure kills the started revoke while it waits: no request is ever sent', () => {
+    for (const env of [
+      { FAKE_ACCOUNT: '999999999999' },             // identity guard (exits via die)
+      { FAKE_RULE_PORT: '22' }, { FAKE_RULE_SQUAD: 'bravo' }, { FAKE_RULE_GROUP: 'sg-0ccccccccccccccc' },
+      { FAKE_DESCRIBE_ERROR: '1' },                 // AWS read failure
+      { FAKE_RULE_ABSENT: '1' },                    // gone: aborted, then the full path decides (already absent)
+    ]) {
+      const prior = deployed().shim.length;
+      const r = run(['inject-drift', ...TARGET], env);
+      const mine = r.shim.slice(prior);
+      expect([env, (mine.match(STARTED) || []).length]).toEqual([env, 1]);     // it was really started
+      expect(mine).not.toMatch(/revoke-security-group-ingress/);
+      expect(fs.existsSync(path.join(opdir, 'revoked'))).toBe(false);
+      expect(r.out).not.toMatch(/DRIFT DELETED sgr-\S+ \S+ fast/);
+    }
+  });
+
+  test('a successful fast path sends exactly the validated target, once', () => {
+    deployed();
+    const r = run(['inject-drift', ...TARGET]);
+    expect(r.out).toMatch(/^DRIFT DELETED sgr-0aaaaaaaaaaaaaaaa 203\.0\.113\.10\/32 fast$/m);
+    expect(r.shim.match(STARTED)).toHaveLength(1);
+    expect(r.shim.match(/^aws ec2 revoke-security-group-ingress .*$/gm)).toEqual([
+      'aws ec2 revoke-security-group-ingress --group-id sg-0bbbbbbbbbbbbbbbb --security-group-rule-ids sgr-0aaaaaaaaaaaaaaaa',
+    ]);
+  });
+
+  test('its start-up overlaps the checks: with a 2 s CLI start-up and a 2 s STS call, the release is immediate', () => {
+    deployed();
+    const r = run(['inject-drift', ...TARGET], { FAKE_REVOKE_STARTUP: '2', FAKE_STS_SLEEP: '2' });
+    const [a, b, c, d] = r.out.match(/^TIMING script_start=(\d+) checked=(\d+) revoke_start=(\d+) revoke_done=(\d+)$/m).slice(1).map(Number);
+    expect(b - a).toBeGreaterThanOrEqual(2000);       // the checks really took the slow STS call
+    expect(d - c).toBeLessThan(1500);                 // started serially, the revoke alone would take >= 2000 ms here
+    expect(r.out).toMatch(/ fast$/m);
   });
 });

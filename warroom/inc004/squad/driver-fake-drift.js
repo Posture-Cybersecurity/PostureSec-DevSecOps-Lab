@@ -94,17 +94,52 @@ function createFakeDriftDriver({ account = createFakeAccount(), squad, squadCidr
     p.effect();
   });
 
+  d.deleted = [];                                  // every rule id actually revoked, in order
+  d.failPrepare = 0;
+  d.prepareGate = null;
+  const sgId = `sg-${squad}`;
+
+  // While healthy (read-only): the rule the drift will delete, from state, checked live.
+  d.prepareDrift = async () => {
+    call('prepareDrift');
+    if (d.prepareGate) await d.prepareGate;
+    await yieldNow();
+    if (d.failPrepare > 0) { d.failPrepare -= 1; return { ok: false, summary: 'REFUSED: simulated describe-security-groups error' }; }
+    if (!L.state) return { ok: false, summary: 'REFUSED: no deployed lab in this squad\'s state' };
+    const id = L.state.rules[probeCidr];
+    const live = L.aws.rules.find((r) => r.id === id);
+    if (!live) return { ok: false, summary: 'REFUSED: the squad\'s rule is not present in AWS' };
+    return { ok: true, sg: sgId, ruleId: id, cidr: live.cidr };
+  };
+
   // The console hotfix: the state's rule for the probe's address is deleted in AWS, state untouched.
-  d.injectDrift = async () => {
-    call('injectDrift');
+  // With a prepared target (as squad-lab.sh's fast path): that one rule must still match exactly,
+  // else nothing is deleted; if it no longer exists, the full path decides (idempotent retry).
+  d.injectDrift = async (target) => {
+    call('injectDrift', target ? 'target' : 'full');
     await yieldNow();
     if (d.failInject > 0) { d.failInject -= 1; return { deleted: false, summary: 'FAILED: revoke-security-group-ingress (simulated AWS error)' }; }
+    if (target) {
+      if (!squadCidrs.includes(target.cidr)) throw new Error('REFUSED: inject-drift: the target CIDR is not one of the squad\'s approved addresses');
+      const live = L.aws.rules.find((r) => r.id === target.ruleId);
+      if (live) {
+        if (target.sg !== sgId || live.cidr !== target.cidr || live.tampered) {
+          return { deleted: false, summary: `REFUSED: the prepared target ${target.ruleId} no longer matches this squad's tcp/80 rule; nothing deleted` };
+        }
+        L.aws.rules = L.aws.rules.filter((r) => r.id !== live.id);
+        d.deleted.push(live.id);
+        return { deleted: true, ruleId: live.id, cidr: live.cidr, already: false, path: 'fast' };
+      }
+    }
     if (!L.state) return { deleted: false, summary: 'REFUSED: no deployed lab in this squad\'s state' };
-    const target = L.state.rules[probeCidr];
-    if (!target) return { deleted: false, summary: 'REFUSED: no single Terraform-managed squad rule covers the control plane\'s address' };
-    const before = L.aws.rules.length;
-    L.aws.rules = L.aws.rules.filter((r) => r.id !== target);
-    return { deleted: true, ruleId: target, cidr: probeCidr, already: before === L.aws.rules.length };
+    const id = L.state.rules[probeCidr];
+    if (!id) return { deleted: false, summary: 'REFUSED: no single Terraform-managed squad rule covers the control plane\'s address' };
+    const live = L.aws.rules.find((r) => r.id === id);
+    if (live && live.tampered) return { deleted: false, summary: `REFUSED: rule ${id} is not the tcp/80 rule for the squad's address` };
+    if (!live) return { deleted: true, ruleId: id, cidr: probeCidr, already: true, path: 'full' };
+    L.aws.rules = L.aws.rules.filter((r) => r.id !== id);
+    d.deleted.push(id);
+    return { deleted: true, ruleId: id, cidr: probeCidr, already: false, path: 'full' };
   };
 
   d.observe = async () => {
@@ -140,6 +175,10 @@ function createFakeDriftDriver({ account = createFakeAccount(), squad, squadCidr
     replaceInstance: () => { L.aws.instance = { id: `i-${squad}-${++L.seq}`, created: clock() - bootSeconds * 1000 }; },
     driftSomethingElse: (what) => { L.extraDrift = what; },
     tamperConfig: () => { L.config.intact = false; },
+    // The squad's rule changed shape/tags in AWS (e.g. edited by hand): a prepared target must not match.
+    tamperRule: () => { const r = L.aws.rules.find((x) => x.id === L.state.rules[probeCidr]); if (r) r.tampered = true; },
+    // The squad's rule vanished from AWS (e.g. an earlier attempt deleted it, then the process died).
+    vanishRule: () => { const id = L.state.rules[probeCidr]; L.aws.rules = L.aws.rules.filter((x) => x.id !== id); },
   };
   return d;
 }

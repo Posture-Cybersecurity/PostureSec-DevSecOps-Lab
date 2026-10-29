@@ -35,6 +35,7 @@ beforeAll(async () => {
     pool = db.pool;
     await db.initDB();
     await require('../src/warroom/state').initWarRoom();
+    await require('../src/warroom/state').setStatus('idle');   // the alarm row is shared by every suite in this database
     await live.ensureTables();
     await pool.query('DELETE FROM warroom_inc004_live');
     server = require('../src/index').listen(0);

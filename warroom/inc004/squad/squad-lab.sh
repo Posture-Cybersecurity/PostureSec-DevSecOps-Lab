@@ -17,8 +17,13 @@
 # INC-005 "console hotfix drift" (WARROOM_SCENARIO=drift) runs on the same lab, differently:
 #   * the DESIRED configuration (desired.tfvars: the squad's addresses + the AMI pinned at deploy)
 #     is written ONCE, at the baseline, and its sha256 recorded; nothing may change it afterwards;
-#   squad-lab.sh inject-drift              delete the squad's REAL Terraform-managed port-80 rule
-#                                          through the AWS API (not Terraform); state is untouched
+#   squad-lab.sh prepare-drift             read-only, while the lab is healthy: resolve that rule from
+#                                          state and check it live; prints TARGET <sg> <rule> <cidr>
+#   squad-lab.sh inject-drift [<sg> <rule> <cidr>]   delete the squad's REAL Terraform-managed port-80
+#                                          rule through the AWS API (not Terraform); state is untouched.
+#                                          With a prepared target: no Terraform on the critical path —
+#                                          the identity check and a live read of that one rule run in
+#                                          parallel, every property must still match, then the revoke.
 #   squad-lab.sh plan restore              saved plan of the unchanged configuration (guard: drift —
 #                                          exactly one create, the squad's own rule, nothing else)
 #   set-config / inject-fault / tag are refused: no input changes, no out-of-band tags.
@@ -39,6 +44,7 @@
 # No credential is ever read, printed or stored here.
 # =============================================================================
 set -Eeuo pipefail
+T_SCRIPT="${EPOCHREALTIME:-}"; T_SCRIPT="${T_SCRIPT/[.,]/}"; T_SCRIPT=$(( ${T_SCRIPT:-0} / 1000 ))   # script start (ms) for TIMING
 HERE="$(cd "$(dirname "$0")/.." && (pwd -W 2>/dev/null || pwd))"     # warroom/inc004
 TF="$HERE/terraform"
 STACK="$HERE/../../deploy/aws-ec2"
@@ -85,6 +91,7 @@ identity(){
   ! grep -qE '^\s*backend\s+"' "$TF"/*.tf "$STACK"/*.tf || die "a backend block appeared; squad state must stay local and per squad"
   export TF_VAR_expected_account_id="$acct" TF_VAR_squad_id="$SQUAD" TF_VAR_use_precreated_profile="$precreated" TF_VAR_warroom_incident="$INCIDENT"
   ARN="$arn"
+  IDENTITY_DONE=1
 }
 
 workspace(){
@@ -142,7 +149,103 @@ ssm_run(){
 
 out(){ tf output -raw "$1" 2>/dev/null || true; }
 
-identity
+# The squad's Terraform-managed tcp/80 rule: from STATE, for the squad address the platform probes
+# from (so users notice), then checked LIVE in AWS. Sets SG RULE CIDR.
+# Returns 0 = live and well-formed, 2 = already gone, 1 = refused (reason printed).
+resolve_target(){
+  local probe rules pick live
+  SG="$(out security_group_id)"; [[ "$SG" =~ ^sg-[0-9a-f]+$ ]] || die "no deployed lab in this squad's state"
+  probe="$(curl -s -m 10 https://checkip.amazonaws.com | tr -d '\r\n ')"
+  rules="$(tf show -json | jq -c '[.values.root_module.child_modules[]?.resources[]? | select(.address | startswith("module.lab.aws_vpc_security_group_ingress_rule.http[")) | {address, id: .values.security_group_rule_id, cidr: .values.cidr_ipv4, sg: .values.security_group_id}]')"
+  pick="$(node -e "const D=require(process.argv[1]); const r=JSON.parse(process.argv[2]).filter((x) => process.argv[4].split(',').includes(x.cidr) && D.cidrContains(x.cidr, process.argv[3])); console.log(r.length === 1 ? JSON.stringify(r[0]) : '')" "$HERE/squad/scenario-drift.js" "$rules" "$probe" "$WARROOM_SQUAD_CIDRS")"
+  [ -n "$pick" ] || { echo "DRIFT REFUSED no single Terraform-managed squad rule covers the control plane's address"; return 1; }
+  RULE="$(echo "$pick" | jq -r .id)"; CIDR="$(echo "$pick" | jq -r .cidr)"
+  { [[ "$RULE" =~ ^sgr-[0-9a-f]+$ ]] && [ "$(echo "$pick" | jq -r .sg)" = "$SG" ]; } || { echo "DRIFT REFUSED the state's rule does not belong to the lab's security group"; return 1; }
+  # Ownership in AWS, not just in state: the group must carry this squad's and this incident's tags.
+  aws ec2 describe-security-groups --group-ids "$SG" --query 'SecurityGroups[0].Tags' --output json \
+    | jq -e --arg s "$SQUAD" 'from_entries | .WarRoomSquad == $s and .WarRoom == "INC-005"' >/dev/null \
+    || { echo "DRIFT REFUSED the security group is not tagged WarRoomSquad=$SQUAD, WarRoom=INC-005"; return 1; }
+  live="$(aws ec2 describe-security-group-rules --filters Name=group-id,Values="$SG" --query "SecurityGroupRules[?SecurityGroupRuleId=='$RULE']" --output json)"
+  [ "$(echo "$live" | jq length)" = 0 ] && return 2
+  echo "$live" | jq -e --arg c "$CIDR" '.[0] | (.IsEgress | not) and .IpProtocol == "tcp" and .FromPort == 80 and .ToPort == 80 and .CidrIpv4 == $c' >/dev/null \
+    || { echo "DRIFT REFUSED rule $RULE is not the tcp/80 rule for the squad's address"; return 1; }
+  return 0
+}
+
+# Wall-clock milliseconds (bash 5 EPOCHREALTIME; whole seconds otherwise) for the TIMING line.
+now_ms(){ local t="${EPOCHREALTIME:-}"; if [ -n "$t" ]; then t="${t/[.,]/}"; echo $((10#$t / 1000)); else echo "$(( $(date +%s) * 1000 ))"; fi; }
+
+# Fast path only: the revoke CLI is started BEFORE the checks, so its 1-2 s start-up overlaps them.
+# It cannot send anything until its --group-id arrives on stdin, written only after every check
+# passed; abort_revoke (also on any exit) SIGKILLs it while it waits, so no request is ever made.
+# (Not --cli-input-json from stdin: AWS CLI v2 reads that twice and rejects a pipe.)
+start_revoke(){
+  exec {REV_W}> >(exec aws ec2 revoke-security-group-ingress --group-id file:///dev/stdin --security-group-rule-ids "$1" >/dev/null 2>&1)
+  REV_PID=$!
+  trap abort_revoke EXIT
+}
+abort_revoke(){
+  [ -n "${REV_W:-}" ] || return 0
+  kill -9 "$REV_PID" 2>/dev/null || true
+  exec {REV_W}>&-; REV_W=
+  wait "$REV_PID" 2>/dev/null || true
+}
+# Release the started revoke with the validated group ($RULE is the rule it was started with).
+release_revoke(){
+  local rc=0
+  printf '%s' "$SG" >&"$REV_W"
+  exec {REV_W}>&-; REV_W=
+  wait "$REV_PID" || rc=$?
+  return "$rc"
+}
+
+# The one mutation: revoke exactly SG/RULE, then confirm it is gone. $1 = fast | full (reported).
+revoke_and_confirm(){
+  local left t_rs t_rd
+  t_rs="$(now_ms)"
+  if [ -n "${REV_W:-}" ]; then
+    release_revoke || { echo "DRIFT FAILED revoke-security-group-ingress $RULE"; return 0; }
+  else
+    aws ec2 revoke-security-group-ingress --group-id "$SG" --security-group-rule-ids "$RULE" >/dev/null \
+      || { echo "DRIFT FAILED revoke-security-group-ingress $RULE"; return 0; }
+  fi
+  t_rd="$(now_ms)"
+  echo "TIMING script_start=$T_SCRIPT checked=${T_CHECKED:-$t_rs} revoke_start=$t_rs revoke_done=$t_rd"
+  left="$(aws ec2 describe-security-group-rules --filters Name=group-id,Values="$SG" --query "length(SecurityGroupRules[?SecurityGroupRuleId=='$RULE'])" --output text)"
+  if [ "$left" = 0 ]; then echo "DRIFT DELETED $RULE $CIDR $1"; else echo "DRIFT FAILED rule $RULE still present after the revoke"; fi
+}
+
+# Fast path with a target prepared while the lab was healthy. Nothing is trusted from the cache:
+# the rule is read live (in parallel with the identity/account guard) and must still be this
+# squad's tcp/80 ingress rule in this group, from this approved CIDR, tagged for this squad and
+# INC-005 — otherwise nothing is deleted. Returns 1 only if the rule no longer exists (the full
+# path then decides: e.g. a retry after a crash finds it already gone).
+fast_drift(){
+  local sg="$1" rule="$2" cidr="$3" got rc=0 reader
+  drift || die "inject-drift belongs to the drift scenario (INC-005)"
+  { [[ "$sg" =~ ^sg-[0-9a-f]+$ ]] && [[ "$rule" =~ ^sgr-[0-9a-f]+$ ]]; } || die "inject-drift: malformed target"
+  [[ ",${WARROOM_SQUAD_CIDRS:-}," == *",$cidr,"* ]] || die "inject-drift: the target CIDR is not one of the squad's approved addresses"
+  desired_intact || die "the desired configuration changed since deployment; refusing to inject"
+  got="$(mktemp)"
+  start_revoke "$rule"                       # gated: sends nothing until every check below passes
+  aws ec2 describe-security-group-rules --security-group-rule-ids "$rule" --output json > "$got" 2>&1 & reader=$!
+  identity                                   # account / root guards; a refusal exits (and aborts) before any change
+  wait "$reader" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    grep -q 'InvalidSecurityGroupRuleId.NotFound' "$got" && { abort_revoke; return 1; }
+    echo "DRIFT FAILED describe-security-group-rules $rule: $(tr -d '\r\n' < "$got" | cut -c1-160 | mask)"; exit 0
+  fi
+  jq -e --arg sg "$sg" --arg c "$cidr" --arg s "$SQUAD" '.SecurityGroupRules | length == 1 and (.[0] | .GroupId == $sg and (.IsEgress | not) and .IpProtocol == "tcp" and .FromPort == 80 and .ToPort == 80 and .CidrIpv4 == $c and ((.Tags // []) | from_entries | .WarRoomSquad == $s and .WarRoom == "INC-005"))' "$got" >/dev/null \
+    || { echo "DRIFT REFUSED the prepared target $rule no longer matches this squad's tcp/80 rule (group, shape, CIDR or tags); nothing deleted"; exit 0; }
+  T_CHECKED="$(now_ms)"
+  SG="$sg" RULE="$rule" CIDR="$cidr"
+  revoke_and_confirm fast; exit 0
+}
+
+if [ "${1:-}" = inject-drift ] && [ $# -eq 4 ]; then
+  fast_drift "$2" "$3" "$4" || true            # returns only when the rule is gone: fall through to the full path
+fi
+[ -n "${IDENTITY_DONE:-}" ] || identity
 workspace
 cmd="${1:-}"; shift || true
 
@@ -213,26 +316,22 @@ case "$cmd" in
     # rule is already gone (a retry after a crash), nothing else is deleted.
     drift || die "inject-drift belongs to the drift scenario (INC-005)"
     desired_intact || die "the desired configuration changed since deployment; refusing to inject"
-    sg="$(out security_group_id)"; [[ "$sg" =~ ^sg-[0-9a-f]+$ ]] || die "no deployed lab in this squad's state"
-    probe="$(curl -s -m 10 https://checkip.amazonaws.com | tr -d '\r\n ')"
-    # The rule recorded in STATE for the squad address the platform probes from (so users notice).
-    rules="$(tf show -json | jq -c '[.values.root_module.child_modules[]?.resources[]? | select(.address | startswith("module.lab.aws_vpc_security_group_ingress_rule.http[")) | {address, id: .values.security_group_rule_id, cidr: .values.cidr_ipv4, sg: .values.security_group_id}]')"
-    pick="$(node -e "const D=require(process.argv[1]); const r=JSON.parse(process.argv[2]).filter((x) => process.argv[4].split(',').includes(x.cidr) && D.cidrContains(x.cidr, process.argv[3])); console.log(r.length === 1 ? JSON.stringify(r[0]) : '')" "$HERE/squad/scenario-drift.js" "$rules" "$probe" "$WARROOM_SQUAD_CIDRS")"
-    [ -n "$pick" ] || { echo "DRIFT REFUSED no single Terraform-managed squad rule covers the control plane's address"; exit 0; }
-    id="$(echo "$pick" | jq -r .id)"; cidr="$(echo "$pick" | jq -r .cidr)"
-    { [[ "$id" =~ ^sgr-[0-9a-f]+$ ]] && [ "$(echo "$pick" | jq -r .sg)" = "$sg" ]; } || { echo "DRIFT REFUSED the state's rule does not belong to the lab's security group"; exit 0; }
-    # Ownership in AWS, not just in state: the group must carry this squad's and this incident's tags.
-    aws ec2 describe-security-groups --group-ids "$sg" --query 'SecurityGroups[0].Tags' --output json \
-      | jq -e --arg s "$SQUAD" 'from_entries | .WarRoomSquad == $s and .WarRoom == "INC-005"' >/dev/null \
-      || { echo "DRIFT REFUSED the security group is not tagged WarRoomSquad=$SQUAD, WarRoom=INC-005"; exit 0; }
-    live="$(aws ec2 describe-security-group-rules --filters Name=group-id,Values="$sg" --query "SecurityGroupRules[?SecurityGroupRuleId=='$id']" --output json)"
-    if [ "$(echo "$live" | jq length)" = 0 ]; then echo "DRIFT DELETED $id $cidr already-absent"; exit 0; fi
-    echo "$live" | jq -e --arg c "$cidr" '.[0] | (.IsEgress | not) and .IpProtocol == "tcp" and .FromPort == 80 and .ToPort == 80 and .CidrIpv4 == $c' >/dev/null \
-      || { echo "DRIFT REFUSED rule $id is not the tcp/80 rule for the squad's address"; exit 0; }
-    aws ec2 revoke-security-group-ingress --group-id "$sg" --security-group-rule-ids "$id" >/dev/null \
-      || { echo "DRIFT FAILED revoke-security-group-ingress $id"; exit 0; }
-    left="$(aws ec2 describe-security-group-rules --filters Name=group-id,Values="$sg" --query "length(SecurityGroupRules[?SecurityGroupRuleId=='$id'])" --output text)"
-    if [ "$left" = 0 ]; then echo "DRIFT DELETED $id $cidr"; else echo "DRIFT FAILED rule $id still present after the revoke"; fi
+    rc=0; resolve_target || rc=$?
+    case "$rc" in
+      0) revoke_and_confirm full ;;
+      2) echo "DRIFT DELETED $RULE $CIDR already-absent full" ;;
+    esac
+    ;;
+
+  prepare-drift)
+    # Read-only, while the lab is healthy: the full resolution and ownership checks, ahead of the fuse.
+    drift || die "prepare-drift belongs to the drift scenario (INC-005)"
+    desired_intact || die "the desired configuration changed since deployment; refusing to prepare"
+    rc=0; resolve_target || rc=$?
+    case "$rc" in
+      0) echo "TARGET $SG $RULE $CIDR" ;;
+      2) echo "DRIFT REFUSED the squad's rule is not present in AWS" ;;
+    esac
     ;;
 
   observe)

@@ -139,7 +139,7 @@ describe('driver-real: INC-005 drift scenario', () => {
 
   test('injectDrift parses deleted / already-absent / refused / failed, and fails closed on anything else', async () => {
     expect(await drift({ 'inject-drift': { stdout: 'DRIFT DELETED sgr-0aaa 203.0.113.10/32\n' } }).d.injectDrift())
-      .toEqual({ deleted: true, ruleId: 'sgr-0aaa', cidr: '203.0.113.10/32', already: false });
+      .toEqual({ deleted: true, ruleId: 'sgr-0aaa', cidr: '203.0.113.10/32', already: false, path: 'full', timing: { spawned: expect.any(Number), returned: expect.any(Number) } });
     expect(await drift({ 'inject-drift': { stdout: 'DRIFT DELETED sgr-0aaa 203.0.113.10/32 already-absent\n' } }).d.injectDrift())
       .toMatchObject({ deleted: true, already: true });
     const refused = await drift({ 'inject-drift': { stdout: 'DRIFT REFUSED rule sgr-0aaa is not the tcp/80 rule for 203.0.113.10/32\n' } }).d.injectDrift();
@@ -161,5 +161,39 @@ describe('driver-real: INC-005 drift scenario', () => {
     expect(await d.showPlan('restore-alpha-1')).toMatch(/http\["<squad-network-1>"\] will be created/);
     expect((await d.plan('restore')).summary).toMatch(/http\["<ip>"\]/);
     for (const s of [ev, await d.showPlan('restore-alpha-1')]) expect(s).not.toMatch(/\b\d{1,3}(\.\d{1,3}){3}\b/);
+  });
+});
+
+describe('driver-real: INC-005 prepared target', () => {
+  const drift = (replies) => make(replies, { scenario: 'drift' });
+
+  test('prepareDrift parses TARGET, a refusal, and fails closed on anything else', async () => {
+    const { d, calls } = drift({ 'prepare-drift': { stdout: 'TARGET sg-0bbb sgr-0aaa 203.0.113.10/32\n' } });
+    expect(await d.prepareDrift()).toEqual({ ok: true, sg: 'sg-0bbb', ruleId: 'sgr-0aaa', cidr: '203.0.113.10/32' });
+    expect(calls[0].args).toEqual([SCRIPT, 'prepare-drift']);
+    expect(await drift({ 'prepare-drift': { stdout: "DRIFT REFUSED the squad's rule is not present in AWS\n" } }).d.prepareDrift())
+      .toEqual({ ok: false, summary: "REFUSED: the squad's rule is not present in AWS" });
+    await expect(drift({ 'prepare-drift': { stdout: 'nonsense\n' } }).d.prepareDrift()).rejects.toBeInstanceOf(DriverError);
+  });
+
+  test('injectDrift passes a prepared target as three plain arguments (no shell) and reports the path', async () => {
+    const { d, calls } = drift({ 'inject-drift': { stdout: 'DRIFT DELETED sgr-0aaa 203.0.113.10/32 fast\n' } });
+    expect(await d.injectDrift({ sg: 'sg-0bbb', ruleId: 'sgr-0aaa', cidr: '203.0.113.10/32' }))
+      .toEqual({ deleted: true, ruleId: 'sgr-0aaa', cidr: '203.0.113.10/32', already: false, path: 'fast', timing: { spawned: expect.any(Number), returned: expect.any(Number) } });
+    expect(calls[0].args).toEqual([SCRIPT, 'inject-drift', 'sg-0bbb', 'sgr-0aaa', '203.0.113.10/32']);
+    expect(await drift({ 'inject-drift': { stdout: 'DRIFT DELETED sgr-0aaa 203.0.113.10/32 already-absent full\n' } }).d.injectDrift({ sg: 'sg-0bbb', ruleId: 'sgr-0aaa', cidr: '203.0.113.10/32' }))
+      .toMatchObject({ deleted: true, already: true, path: 'full' });
+    const refused = await drift({ 'inject-drift': { stdout: 'DRIFT REFUSED the prepared target sgr-0aaa no longer matches this squad\'s tcp/80 rule (group, shape, CIDR or tags); nothing deleted\n' } }).d.injectDrift({ sg: 'sg-0bbb', ruleId: 'sgr-0aaa', cidr: '203.0.113.10/32' });
+    expect(refused.deleted).toBe(false);
+    expect(refused.summary).toMatch(/nothing deleted/);
+  });
+});
+
+describe('driver-real: INC-005 injection timing', () => {
+  test('the TIMING line is parsed, alongside the driver\'s own spawn/return marks', async () => {
+    const { d } = make({ 'inject-drift': { stdout: 'TIMING script_start=1000 checked=1500 revoke_start=1510 revoke_done=2900\nDRIFT DELETED sgr-0aaa 203.0.113.10/32 fast\n' } }, { scenario: 'drift' });
+    const r = await d.injectDrift({ sg: 'sg-0bbb', ruleId: 'sgr-0aaa', cidr: '203.0.113.10/32' });
+    expect(r.timing).toEqual({ spawned: expect.any(Number), returned: expect.any(Number), script_start: 1000, checked: 1500, revoke_start: 1510, revoke_done: 2900 });
+    expect(r.timing.returned).toBeGreaterThanOrEqual(r.timing.spawned);
   });
 });
