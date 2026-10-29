@@ -28,7 +28,7 @@ services:
       - pgdata:/var/lib/postgresql/data
     # The "harmless" edit: the data tier was given its own isolated network.
     networks:
-      - dbnet
+      - posturenet
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U posturesec_user -d posturesec_db"]
       interval: 10s
@@ -102,8 +102,6 @@ services:
 # Docker's embedded DNS cannot resolve `db` from `backend`.
 networks:
   posturenet:
-    driver: bridge
-  dbnet:
     driver: bridge
 
 volumes:
