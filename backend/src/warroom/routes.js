@@ -18,6 +18,9 @@ const config = require('./config');
 const { getIncident, publicIncident, setStatus } = require('./state');
 // Dispatches to the configured incident's injector (INC-001 default, INC-002 API4).
 const injector = require('./incidents');
+// INC-004/INC-005 drift + security-group controls.
+const drift = require('./drift_controller');
+const awsSg = require('./aws_sg');
 
 function tokenOk(req) {
   const expected = config.instructorToken;
@@ -58,9 +61,17 @@ router.get('/', async (_req, res) => {
     // evidence. Every variant still makes the squad discover the root cause.
     const api4 = config.incident === 'INC-002';
     const inc003 = config.incident === 'INC-003';
+    const inc005 = config.incident === 'INC-005' || config.incident === 'INC-004';
 
     let activeBrief;
-    if (inc003) {
+    if (inc005) {
+      activeBrief =
+        'POSTURESec was reachable over public HTTP and then abruptly stopped responding to '
+        + 'external users, while the application process and database remain healthy. '
+        + 'Investigate why external reachability was lost, examine the infrastructure state, '
+        + 'identify the change, and restore public access through a reviewed, guarded Terraform '
+        + 'remediation — confirm every step with evidence.';
+    } else if (inc003) {
       activeBrief =
         'Your team has successfully built and deployed the Sprint 3 application, and it '
         + 'is currently running normally. Security monitoring has detected sensitive '
@@ -81,7 +92,14 @@ router.get('/', async (_req, res) => {
         + 'Investigate what happened, establish who and what was affected, and confirm it with evidence.';
     }
 
-    const investigate = inc003 ? [
+    const investigate = inc005 ? [
+      'When did external reachability stop, and is the app itself still healthy?',
+      'What does the infrastructure state show about the public HTTP ingress?',
+      'Which security-group rule changed, and on which security group?',
+      'Does Terraform report drift against the expected baseline?',
+      'What is the single corrective change, and does it pass the plan guard?',
+      'How do we apply the approved remediation and prove access is restored?',
+    ] : inc003 ? [
       'What triggered the security alert?',
       'How did credential material come to be associated with the image?',
       'Is the credential present in the final image filesystem?',
@@ -99,7 +117,13 @@ router.get('/', async (_req, res) => {
       'How do we fix it?',
     ];
 
-    const evidence_sources = inc003 ? [
+    const evidence_sources = inc005 ? [
+      'Public HTTP reachability from outside the host (curl of the application URL)',
+      'The dedicated security group and its ingress rules (Terraform state / drift)',
+      'The incident record and warroom_access_log table',
+      'Container and database health (compose ps / healthchecks)',
+      'Terraform plan JSON for the remediation and the plan-guard verdict',
+    ] : inc003 ? [
       'Container image metadata and history (docker image inspect / docker history)',
       'The image build configuration',
       'The image build context',
@@ -171,6 +195,37 @@ router.post('/status/:state', requireInstructor, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to set state' });
+  }
+});
+
+// ---- INC-004 / INC-005 operational controls (instructor token, fail closed) ----
+
+// Terraform drift detection against the expected baseline.
+router.get('/drift', requireInstructor, async (_req, res) => {
+  try {
+    res.json(await drift.detect());
+  } catch (err) {
+    res.status(500).json({ error: 'Drift detection failed', detail: err.message });
+  }
+});
+
+// Generate a remediation plan, pass it through the guard, and apply ONLY if the
+// guard approves (exactly one create of the dedicated HTTP ingress rule).
+router.post('/remediate', requireInstructor, async (_req, res) => {
+  try {
+    const out = await drift.remediate();
+    res.status(out.ok ? 200 : 409).json(out);
+  } catch (err) {
+    res.status(500).json({ error: 'Remediation failed', detail: err.message });
+  }
+});
+
+// Current state of the dedicated security group's public HTTP rule.
+router.get('/sg-state', requireInstructor, async (_req, res) => {
+  try {
+    res.json(await awsSg.verifyHttpIngressState());
+  } catch (err) {
+    res.status(500).json({ error: 'Security-group check failed', detail: err.message });
   }
 });
 

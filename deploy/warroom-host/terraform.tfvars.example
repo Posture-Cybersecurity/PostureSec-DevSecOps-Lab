@@ -1,0 +1,27 @@
+# Copy to terraform.tfvars and adjust. Do NOT put secrets here.
+# Secrets (instructor_token, db_password) are NEVER set in this file — supply
+# them via environment variables at deploy time:
+#   export TF_VAR_instructor_token='<a token of at least 32 characters>'
+#   export TF_VAR_db_password='<a unique password of at least 12 characters>'
+
+aws_region  = "us-east-1"
+environment = "dev"
+name_prefix = "warroom"
+
+instance_type    = "t3.medium" # build headroom for the on-host image build
+root_volume_size = 20
+
+# Public HTTP for all lab testers (intentional).
+http_ingress_cidr = "0.0.0.0/0"
+
+# SSH: leave empty for no SSH, or set to YOUR IP/CIDR (never 0.0.0.0/0).
+ssh_ingress_cidr = ""
+# key_name       = "my-ec2-keypair"
+
+# Default 300s from verified readiness to the INC-005 injection.
+# incident_delay_seconds = 300
+
+# The least-privilege IAM role, instance profile, SSM access and the private
+# S3 app-delivery bucket are created automatically — nothing to set here.
+# app_bundle_path  = "app-bundle.tgz"   # built before apply (see the guide)
+# app_compose_file = "docker-compose.inc005.yml"

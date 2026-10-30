@@ -3,12 +3,24 @@ dist/
 .env
 *.log
 
-# Terraform
+# Terraform (EKS root)
 terraform/.terraform/
 terraform/*.tfstate
 terraform/*.tfstate.backup
 terraform/.terraform.lock.hcl
 terraform/crash.log
+
+# Terraform state/plans/cache (all roots, incl. deploy/warroom-host) — never commit:
+# state and plans can contain secrets (tokens, passwords baked into user-data).
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+**/tfplan
+crash.log
+
+# Generated application delivery bundle (regenerated from source at deploy time)
+**/app-bundle.tgz
 
 # Docker
 *.tar

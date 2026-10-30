@@ -16,6 +16,11 @@ const registry = {
   'INC-001': () => require('./injector'),                    // Sprint 1 — unchanged
   'INC-002': () => require('./injector_api4'),                // Sprint 2 — API4
   'INC-003': () => require('./injector_image_compromised'),   // Sprint 3 — DSO-W3 image secret
+  // INC-004 is the Terraform drift foundation — it has no synthetic injector of
+  // its own; it is exercised through the tf-exec/drift/guard modules and routes.
+  // Map it to INC-005 so the incident dispatch never throws if selected.
+  'INC-004': () => require('./injector_sg_outage'),
+  'INC-005': () => require('./injector_sg_outage'),           // timed public-HTTP outage
 };
 
 function active() {

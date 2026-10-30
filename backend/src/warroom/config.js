@@ -45,10 +45,42 @@ const config = {
 
 // Which incident this instance runs. Default INC-001 (Sprint 1) so NOTHING about
 // the existing exercise changes unless another incident is explicitly selected.
-const _INCIDENTS = ['INC-001', 'INC-002', 'INC-003'];
+// INC-004 is the Terraform drift foundation; INC-005 is the timed public-HTTP
+// outage built on it (AWS security-group ingress revocation).
+const _INCIDENTS = ['INC-001', 'INC-002', 'INC-003', 'INC-004', 'INC-005'];
 const _sel = (process.env.WAR_ROOM_INCIDENT || 'INC-001').trim().toUpperCase();
 config.incident = _INCIDENTS.includes(_sel) ? _sel : 'INC-001';
 config.incidentId = config.incident;
+
+// Controlled Terraform execution (INC-004 engine). The backend only ever runs
+// terraform in THIS one root — never a client-supplied path — and only the
+// whitelisted subcommands in tf_exec.js.
+config.tf = {
+  // The dedicated INC-005 host root, relative to the repo. Overridable for tests.
+  workdir: (process.env.WARROOM_TF_DIR || 'deploy/warroom-host').trim(),
+  binary: (process.env.WARROOM_TF_BIN || 'terraform').trim(),
+  // Hard ceiling on any single terraform invocation (ms).
+  timeoutMs: num('WARROOM_TF_TIMEOUT_MS', 300000, 10000, 1800000),
+};
+
+// INC-005 (timed public-HTTP outage). The SDK security-group module is scoped
+// to EXACTLY this security group, in this account/region — nothing else. These
+// come from `terraform output warroom_env` (see deploy/warroom-host/outputs.tf).
+config.inc005 = {
+  sgId: (process.env.WARROOM_SG_ID || '').trim(),
+  region: (process.env.WARROOM_AWS_REGION || process.env.AWS_REGION || 'us-east-1').trim(),
+  account: (process.env.WARROOM_AWS_ACCOUNT || '').trim(),
+  httpPort: num('WARROOM_SG_HTTP_PORT', 80, 1, 65535),
+  httpCidr: (process.env.WARROOM_SG_HTTP_CIDR || '0.0.0.0/0').trim(),
+  // Identity tag the SDK re-checks before mutating — defence in depth on top of
+  // the SG id (matches the terraform SG tag warroom:incident=INC-005).
+  requireTagKey: (process.env.WARROOM_SG_TAG_KEY || 'warroom:incident').trim(),
+  requireTagValue: (process.env.WARROOM_SG_TAG_VALUE || 'INC-005').trim(),
+  // Terraform resource address of the drift target rule — what the plan guard
+  // binds the single allowed create operation to.
+  ruleAddress: (process.env.WARROOM_HTTP_RULE_ADDRESS
+    || 'aws_vpc_security_group_ingress_rule.http').trim(),
+};
 
 // INC-003 (Sprint 3 — DSO-W3: "the image is compromised"). A build-time secret
 // exposure: a synthetic TRAINING canary baked into the container image. The

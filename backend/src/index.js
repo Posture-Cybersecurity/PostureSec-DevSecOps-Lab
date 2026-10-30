@@ -13,7 +13,7 @@ const warroomState = require('./warroom/state');
 const { assignRequestId } = require('./warroom/requestId');
 const { accessLogger } = require('./warroom/logger');
 const incidentRoutes = require('./warroom/routes');
-const { armIncidentTimer } = require('./warroom/timer');
+const { armIncidentTimer, armWhenReady } = require('./warroom/timer');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -59,8 +59,18 @@ async function start() {
     app.listen(PORT, '0.0.0.0', () => {
       console.log(`🚀 PostureSec backend running on port ${PORT}`);
       // Arm the incident fuse only after the server is accepting connections —
-      // the injector makes real requests to this same port.
-      if (warroom.enabled) armIncidentTimer();
+      // the injector makes real requests to this same port. INC-005 additionally
+      // waits for verified readiness (DB reachable) before arming.
+      if (warroom.enabled) {
+        if (warroom.incident === 'INC-005' || warroom.incident === 'INC-004') {
+          armWhenReady(async () => {
+            const { rows } = await db.pool.query('SELECT 1 AS ok');
+            return rows[0] && rows[0].ok === 1;
+          });
+        } else {
+          armIncidentTimer();
+        }
+      }
     });
   } catch (err) {
     console.error('Failed to start server:', err);

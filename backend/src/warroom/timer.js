@@ -41,4 +41,24 @@ function cancelIncidentTimer() {
   return false;
 }
 
-module.exports = { armIncidentTimer, cancelIncidentTimer };
+/**
+ * Arm only after verified application readiness (INC-005 requirement). `probe`
+ * is an async () => boolean; it is polled until it passes (or the attempts run
+ * out) and only then is the fuse armed. Idempotent via armIncidentTimer.
+ */
+async function armWhenReady(probe, { attempts = 30, intervalMs = 1000 } = {}) {
+  if (!config.enabled) return null;
+  for (let i = 0; i < attempts; i++) {
+    let ready = false;
+    try { ready = await probe(); } catch (_e) { ready = false; }
+    if (ready) {
+      console.log(`[warroom] readiness confirmed after ${i + 1} check(s); arming fuse`);
+      return armIncidentTimer();
+    }
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+  console.error('[warroom] readiness never confirmed; fuse NOT armed');
+  return null;
+}
+
+module.exports = { armIncidentTimer, cancelIncidentTimer, armWhenReady };
