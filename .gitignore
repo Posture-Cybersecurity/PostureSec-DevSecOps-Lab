@@ -21,9 +21,9 @@ Thumbs.db
 
 # PostureBlogging EC2 lab stack (deploy/aws-ec2): local state, plans, your values
 deploy/aws-ec2/.terraform/
-deploy/aws-ec2/.terraform.lock.hcl
 deploy/aws-ec2/*.tfstate
 deploy/aws-ec2/*.tfstate.*
 deploy/aws-ec2/tfplan
 deploy/aws-ec2/tfplan.*
 deploy/aws-ec2/terraform.tfvars
+deploy/aws-ec2/*.tfplan
