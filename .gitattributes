@@ -1,0 +1,4 @@
+# Shell scripts and the EC2 Compose override run on Linux: always check them
+# out with LF, even on Windows with core.autocrlf=true (CRLF breaks bash).
+*.sh text eol=lf
+deploy/aws-ec2/*.yaml text eol=lf

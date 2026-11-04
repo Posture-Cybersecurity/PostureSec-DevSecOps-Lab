@@ -1,0 +1,23 @@
+# Compose OVERRIDE for the EC2 lab deployment. Applied on top of the repo's
+# unchanged docker-compose.yml:
+#
+#   docker compose -f docker-compose.yml -f compose.ec2.yaml --env-file .env up -d --build
+#
+# It changes only what an internet-facing host needs:
+#  1. The database password comes from .env, generated on the instance at
+#     first boot (user_data.sh) — not the demo password committed in
+#     docker-compose.yml. It never leaves the instance.
+#  2. PostgreSQL is not published on the host at all (the base file maps
+#     55900:5432 for local development). Backend reaches it on the Compose
+#     network as before.
+# Everything else — images, healthchecks, read-only backend, restart policy,
+# port 80 -> frontend 8080 — is the existing configuration.
+services:
+  db:
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+    ports: !reset []
+
+  backend:
+    environment:
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
