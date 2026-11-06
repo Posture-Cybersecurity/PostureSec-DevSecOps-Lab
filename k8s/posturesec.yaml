@@ -23,7 +23,7 @@ metadata:
   labels:
     app.kubernetes.io/part-of: posturesec
 data:
-  DB_HOST: "posturesec-db"
+  DB_HOST: "posturesec-postgres"
   DB_PORT: "5432"
   PORT: "5000"
 
