@@ -1,0 +1,27 @@
+data.aws_vpc.default: Reading...
+aws_iam_role.warroom: Refreshing state... [id=warroom-ec2-role]
+data.aws_caller_identity.current: Reading...
+data.aws_ami.ubuntu: Reading...
+data.aws_caller_identity.current: Read complete after 0s [id=372815112535]
+aws_s3_bucket.app: Refreshing state... [id=warroom-inc005-372815112535]
+data.aws_ami.ubuntu: Read complete after 2s [id=ami-033ea4ff4a9c726dc]
+aws_iam_role_policy_attachment.ssm: Refreshing state... [id=warroom-ec2-role-20261105154246528100000001]
+aws_iam_instance_profile.warroom: Refreshing state... [id=warroom-instance-profile]
+data.aws_vpc.default: Read complete after 3s [id=vpc-000f73a76a199b726]
+data.aws_subnets.default: Reading...
+aws_security_group.warroom: Refreshing state... [id=sg-0818d77259561fc29]
+data.aws_subnets.default: Read complete after 1s [id=us-east-1]
+aws_vpc_security_group_egress_rule.all: Refreshing state... [id=sgr-08db70654a0004490]
+aws_vpc_security_group_ingress_rule.http: Refreshing state... [id=sgr-07e4a14970726a0e9]
+aws_s3_bucket_public_access_block.app: Refreshing state... [id=warroom-inc005-372815112535]
+aws_s3_bucket_server_side_encryption_configuration.app: Refreshing state... [id=warroom-inc005-372815112535]
+aws_s3_object.app_bundle: Refreshing state... [id=app-bundle.tgz]
+data.aws_iam_policy_document.warroom_sg: Reading...
+data.aws_iam_policy_document.warroom_sg: Read complete after 0s [id=597187405]
+aws_iam_role_policy.warroom_sg: Refreshing state... [id=warroom-ec2-role:warroom-sg-control]
+aws_instance.warroom: Refreshing state... [id=i-064d62c54f63774d9]
+
+No changes. Your infrastructure matches the configuration.
+
+Terraform has compared your real infrastructure against your configuration
+and found no differences, so no changes are needed.

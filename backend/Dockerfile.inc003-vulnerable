@@ -1,0 +1,33 @@
+# ============================================================================
+#  INC-003 (Sprint 3 / DSO-W3) — DELIBERATELY VULNERABLE backend image.
+#  LOCAL TRAINING ONLY. Do NOT use as a template for a real image.
+#
+#  This is the REAL Lab backend (it serves /api, including the War Room incident
+#  API), built so that a synthetic TRAINING credential is baked into an image
+#  layer and carried into the final filesystem. The running container is then
+#  genuinely compromised — no runtime mount is involved.
+#
+#  The weakness is intentionally NOT explained here: discovering how the secret
+#  entered the image is the exercise. The instructor notes hold the answer. The
+#  DSO-305 dumb-init pin is preserved so the only teaching variable is the secret.
+# ============================================================================
+
+# ---- Build stage ----
+FROM node:20-alpine AS build
+WORKDIR /app
+COPY package.json package-lock.json* ./
+RUN npm ci --only=production && npm cache clean --force
+
+# ---- Production stage ----
+FROM node:20-alpine AS production
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+RUN apk --no-cache add dumb-init=1.2.5-r3
+WORKDIR /app
+COPY --from=build /app/node_modules ./node_modules
+COPY src/ ./src/
+COPY training-canary.env ./training-canary.env
+RUN chown -R appuser:appgroup /app
+USER appuser
+EXPOSE 5000
+ENTRYPOINT ["dumb-init", "--"]
+CMD ["node", "src/index.js"]

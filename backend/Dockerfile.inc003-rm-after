@@ -1,0 +1,32 @@
+# ============================================================================
+#  INC-003 (Sprint 3 / DSO-W3) — the "I deleted it, so it's gone" TRAP.
+#  LOCAL TRAINING ONLY.
+#
+#  The synthetic credential enters a layer of the final image, then a LATER layer
+#  deletes it. The final filesystem looks clean, but the secret still lives in the
+#  earlier layer and is recoverable from the image. This proves that "rm the file"
+#  is NOT remediation — only rebuilding a clean image is. verify.sh asserts it:
+#  filesystem scan = clean, image-layer scan = STILL present.
+#  The DSO-305 dumb-init pin is preserved.
+# ============================================================================
+
+# ---- Build stage ----
+FROM node:20-alpine AS build
+WORKDIR /app
+COPY package.json package-lock.json* ./
+RUN npm ci --only=production && npm cache clean --force
+
+# ---- Production stage ----
+FROM node:20-alpine AS production
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+RUN apk --no-cache add dumb-init=1.2.5-r3
+WORKDIR /app
+COPY --from=build /app/node_modules ./node_modules
+COPY src/ ./src/
+COPY training-canary.env ./training-canary.env
+RUN rm -f /app/training-canary.env
+RUN chown -R appuser:appgroup /app
+USER appuser
+EXPOSE 5000
+ENTRYPOINT ["dumb-init", "--"]
+CMD ["node", "src/index.js"]

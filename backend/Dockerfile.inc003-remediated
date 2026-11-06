@@ -1,0 +1,35 @@
+# ============================================================================
+#  INC-003 (Sprint 3 / DSO-W3) — REMEDIATED backend image (the corrected artifact).
+#  LOCAL TRAINING ONLY.
+#
+#  The corrected build keeps credential material OUT of the image: it copies only
+#  application source (scoped COPY src/ ./src/) and never the secret file that was
+#  left in the build context. Any secret the app genuinely needs is injected at
+#  RUNTIME (env / mounted secret), never baked at build time. Rebuilding produces a
+#  NEW, clean image with a NEW digest — you cannot patch a baked layer in place.
+#  The DSO-305 dumb-init pin is preserved.
+#
+#  This is identical to the normal, secure backend image build (backend/Dockerfile);
+#  it exists only so verify.sh can build the GREEN artifact for the same context.
+# ============================================================================
+
+# ---- Build stage ----
+FROM node:20-alpine AS build
+WORKDIR /app
+COPY package.json package-lock.json* ./
+RUN npm ci --only=production && npm cache clean --force
+
+# ---- Production stage ----
+FROM node:20-alpine AS production
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+RUN apk --no-cache add dumb-init=1.2.5-r3
+WORKDIR /app
+COPY --from=build /app/node_modules ./node_modules
+COPY src/ ./src/
+RUN chown -R appuser:appgroup /app
+USER appuser
+EXPOSE 5000
+ENTRYPOINT ["dumb-init", "--"]
+# Any secret the app needs is provided at runtime, e.g.:
+#   docker run -e WARROOM_FAKE_SECRET=... <remediated-image>
+CMD ["node", "src/index.js"]

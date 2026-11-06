@@ -1,0 +1,102 @@
+# =============================================================================
+# INC-005 — hosted timed public-HTTP outage (single public host on AWS EC2).
+# =============================================================================
+# Public HTTP on :80 (frontend). The database is internal only (no published
+# port). The backend's AWS SDK uses the EC2 INSTANCE PROFILE via the default
+# credential chain (IMDSv2) — there is deliberately NO ~/.aws mount and NO AWS
+# key in this file or the container. Only the dedicated SG's IDENTITY is passed
+# (WARROOM_SG_ID / region / account), supplied by terraform through user-data's
+# --env-file. The backend will only ever act on that one security group.
+# =============================================================================
+
+name: posturesec-inc005
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: inc005-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: posturesec_user
+      # Supplied securely at deploy via the --env-file (TF_VAR_db_password);
+      # fails fast if unset rather than falling back to a shared default.
+      POSTGRES_PASSWORD: "${DB_PASSWORD:?DB_PASSWORD must be provided via the env file}"
+      POSTGRES_DB: posturesec_db
+    # No ports: — the database is reachable only on the internal compose network.
+    volumes:
+      - inc005_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U posturesec_user -d posturesec_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    tmpfs:
+      - /tmp
+      - /run
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: inc005-backend
+    restart: unless-stopped
+    environment:
+      PORT: "5000"
+      DB_USER: posturesec_user
+      DB_PASSWORD: "${DB_PASSWORD:?DB_PASSWORD must be provided via the env file}"
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: posturesec_db
+      NODE_ENV: production
+      # War Room — INC-005 selected. Delay + token come from the --env-file.
+      WAR_ROOM_ENABLED: "true"
+      WAR_ROOM_INCIDENT: "INC-005"
+      WAR_ROOM_INCIDENT_DELAY_SECONDS: "${WAR_ROOM_INCIDENT_DELAY_SECONDS:-300}"
+      WAR_ROOM_INSTRUCTOR_TOKEN: "${WAR_ROOM_INSTRUCTOR_TOKEN:-}"
+      # Dedicated SG identity the SDK is scoped to (NOT credentials).
+      WARROOM_SG_ID: "${WARROOM_SG_ID:-}"
+      WARROOM_AWS_REGION: "${WARROOM_AWS_REGION:-us-east-1}"
+      WARROOM_AWS_ACCOUNT: "${WARROOM_AWS_ACCOUNT:-}"
+      WARROOM_SG_HTTP_PORT: "${WARROOM_SG_HTTP_PORT:-80}"
+      WARROOM_SG_HTTP_CIDR: "${WARROOM_SG_HTTP_CIDR:-0.0.0.0/0}"
+      # Region for the default AWS SDK client.
+      AWS_REGION: "${WARROOM_AWS_REGION:-us-east-1}"
+    expose:
+      - "5000"
+    depends_on:
+      db:
+        condition: service_healthy
+    # Readiness: the public frontend and the incident timer key off this.
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:5000/api/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    networks:
+      default:
+        aliases:
+          - posturesec-backend
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: inc005-frontend
+    restart: unless-stopped
+    ports:
+      - "80:8080" # public HTTP for all lab testers
+    depends_on:
+      backend:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  inc005_pgdata:
