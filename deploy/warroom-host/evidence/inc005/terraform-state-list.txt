@@ -1,0 +1,17 @@
+data.aws_ami.ubuntu
+data.aws_caller_identity.current
+data.aws_iam_policy_document.warroom_sg
+data.aws_subnets.default
+data.aws_vpc.default
+aws_iam_instance_profile.warroom
+aws_iam_role.warroom
+aws_iam_role_policy.warroom_sg
+aws_iam_role_policy_attachment.ssm
+aws_instance.warroom
+aws_s3_bucket.app
+aws_s3_bucket_public_access_block.app
+aws_s3_bucket_server_side_encryption_configuration.app
+aws_s3_object.app_bundle
+aws_security_group.warroom
+aws_vpc_security_group_egress_rule.all
+aws_vpc_security_group_ingress_rule.http

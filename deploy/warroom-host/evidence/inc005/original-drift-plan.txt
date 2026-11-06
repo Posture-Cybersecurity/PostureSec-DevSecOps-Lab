@@ -1,0 +1,31 @@
+
+Terraform used the selected providers to generate the following execution
+plan. Resource actions are indicated with the following symbols:
+  + create
+
+Terraform will perform the following actions:
+
+  # aws_vpc_security_group_ingress_rule.http will be created
+  + resource "aws_vpc_security_group_ingress_rule" "http" {
+      + arn                    = (known after apply)
+      + cidr_ipv4              = "0.0.0.0/0"
+      + description            = "Public HTTP for lab testers (INC-005 drift target)"
+      + from_port              = 80
+      + id                     = (known after apply)
+      + ip_protocol            = "tcp"
+      + security_group_id      = "sg-0818d77259561fc29"
+      + security_group_rule_id = (known after apply)
+      + tags                   = {
+          + "Name" = "warroom-http"
+        }
+      + tags_all               = {
+          + "Component"   = "warroom-host"
+          + "Environment" = "dev"
+          + "ManagedBy"   = "Terraform"
+          + "Name"        = "warroom-http"
+          + "Project"     = "PostureSec"
+        }
+      + to_port                = 80
+    }
+
+Plan: 1 to add, 0 to change, 0 to destroy.
