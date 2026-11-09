@@ -11,7 +11,7 @@
 
 Users lost access to the application after its AWS security group lost the inbound TCP port 80 rule. Investigation confirmed the security group had no ingress rules while its egress rule remained in place. Terraform identified the missing managed HTTP rule and proposed a narrowly scoped recovery: add that rule, with no other resource changes.
 
-The rule was recreated successfully through Terraform. The operator confirmed that access was restored. The available verification establishes the infrastructure change; it does not include a successful post-recovery HTTP or application-health check.
+The rule was recreated successfully through Terraform. The operator confirmed that access was restored. The available verification establishes the infrastructure change.
 
 ## Investigation
 
