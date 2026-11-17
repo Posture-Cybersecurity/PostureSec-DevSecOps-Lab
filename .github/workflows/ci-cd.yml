@@ -307,3 +307,47 @@ jobs:
           git add k8s/posturesec.yaml
           git diff --cached --quiet || git commit -m "ci: update k8s images to ${{ steps.sha.outputs.short }} [skip ci]"
           git push
+      - name: Report the GitOps hand-off (DSO-704)
+        run: |
+          {
+            echo "## 🤖 CI bot — GitOps hand-off"
+            echo "Bumped backend/frontend images to \`${{ steps.sha.outputs.short }}\` in \`k8s/posturesec.yaml\` and pushed with \`[skip ci]\` (no recursive run)."
+            echo "Argo CD Application \`posturesec\` (tracking this branch) reconciles the new tags on its next sync — closing the loop."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ---------- CI feedback: post the gate results to the PR (DSO-704) ----------
+  pr-summary:
+    name: "PR security summary"
+    runs-on: ubuntu-latest
+    needs: [lint, dockerfile-lint, sca, iac-scan, image-scan, secret-scan]
+    if: ${{ always() && github.event_name == 'pull_request' }}
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Post / update the gate summary comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const needs = ${{ toJSON(needs) }};
+            const icon = r => r === 'success' ? '✅' : (r === 'skipped' ? '⏭️' : '❌');
+            const rows = Object.entries(needs)
+              .map(([k, v]) => `| \`${k}\` | ${icon(v.result)} ${v.result} |`).join('\n');
+            const body = [
+              '<!-- posturesec-security-gates -->',
+              '### 🛡️ PostureSec security gates',
+              '',
+              '| Gate | Result |',
+              '|---|---|',
+              rows,
+              '',
+              '_A failing gate blocks publish and deploy. Reports are in the run artifacts._',
+            ].join('\n');
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const { data: comments } = await github.rest.issues.listComments({ owner, repo, issue_number });
+            const existing = comments.find(c => c.body && c.body.includes('posturesec-security-gates'));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }

@@ -9,7 +9,7 @@ Branch `feature/sprint-7-gitops-cicd-security`. Work validated on GitHub Actions
 | **DSO-703** Pipeline gates: lint, SCA & scanners | ✅ **PASS** | All five gates enforce **and** run independently; each proven by a deterministic fixture; publish/deploy gated |
 | **DSO-701** GitOps principles & install Argo CD | ◑ **IMPLEMENTED** | Argo CD v3.6.1 vendored + pinned (`argocd/`) + GitOps doc; manifest offline-validated (60 docs, 7 workloads); **live cluster install deferred** (local minikube 1.34 ↔ Docker 29 skew; binary upgrade gated) |
 | **DSO-702** Wire POSTURESec to Argo CD | ◑ **IMPLEMENTED** | Argo CD `Application` syncing `k8s/`; validates against the vendored Application CRD; manages **no** secrets; **live sync deferred** (no cluster) |
-| DSO-704 CI bot closes the loop | ⬜ not started | depends on 701/702; manifest-update bot already present |
+| **DSO-704** CI bot closes the loop | ◑ **IMPLEMENTED** | manifest-update bot (gated behind the scanners) + GitOps hand-off report + sticky PR gate-summary comment; YAML-validated; **live loop deferred** (no cluster) |
 | **DSO-705** Secret hygiene: push protection & rotation | ✅ **PASS** | gitleaks gate enforces + blocks deploy; deterministic fixtures; caught & remediated a hardcoded DB Secret; rotation runbook; push-protection flagged (admin) |
 
 ## DSO-703 contents
@@ -52,6 +52,11 @@ Branch `feature/sprint-7-gitops-cicd-security`. Work validated on GitHub Actions
 | [`44048569920`](https://github.com/Posture-Cybersecurity/PostureSec-DevSecOps-Lab/actions/runs/44048569920) | app pipeline (enforcing, pre-decouple) | failure | SCA + Checkov block; deploy bot skipped |
 | [`44062354609`](https://github.com/Posture-Cybersecurity/PostureSec-DevSecOps-Lab/actions/runs/44062354609) | security-fixtures (+ secrets) | success (9/9) | gitleaks: planted secret detected, clean passes |
 | [`44062354608`](https://github.com/Posture-Cybersecurity/PostureSec-DevSecOps-Lab/actions/runs/44062354608) | app pipeline (+ secret-scan) | failure | secret-scan caught 8 real committed secrets |
+
+## DSO-704 contents
+- [`09-DSO-704-CI-BOT-LOOP.md`](09-DSO-704-CI-BOT-LOOP.md) — the closed CI→Git→Argo CD loop,
+  the manifest-update bot, PR feedback, loop-safety (`[skip ci]`), offline validation,
+  teaching notes, and deferred live-proof steps.
 
 ## One-line summary
 DSO-703 turned a green-by-design "security" pipeline into one where **every gate enforces,
