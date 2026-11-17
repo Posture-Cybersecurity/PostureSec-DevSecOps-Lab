@@ -12,6 +12,14 @@ Branch `feature/sprint-7-gitops-cicd-security`. Work validated on GitHub Actions
 | **DSO-704** CI bot closes the loop | ◑ **IMPLEMENTED** | manifest-update bot (gated behind the scanners) + GitOps hand-off report + sticky PR gate-summary comment; YAML-validated; **live loop deferred** (no cluster) |
 | **DSO-705** Secret hygiene: push protection & rotation | ✅ **PASS** | gitleaks gate enforces + blocks deploy; deterministic fixtures; caught & remediated a hardcoded DB Secret; rotation runbook; push-protection flagged (admin) |
 
+## Capstone (read these first)
+- [`00-SPRINT-7-INSTRUCTOR-GUIDE.md`](00-SPRINT-7-INSTRUCTOR-GUIDE.md) — consolidated guide
+  tying all five tickets together (arc, teaching sequence, honest status, prerequisites).
+- [`SPRINT-7-SLIDES.md`](SPRINT-7-SLIDES.md) — teaching deck (Marp; render with `marp … --pdf`/`--pptx`).
+- **Saturday War Room:** [`../warroom/SPRINT-7-WARROOM-STUDENT.md`](../warroom/SPRINT-7-WARROOM-STUDENT.md)
+  (+ [instructor solution](../warroom/SPRINT-7-WARROOM-INSTRUCTOR.md)) — INC-007 "the green
+  pipeline that shipped a vulnerability": a CI-runnable incident on gate enforcement (no cluster).
+
 ## DSO-703 contents
 - [`01-DSO-703-EVIDENCE.md`](01-DSO-703-EVIDENCE.md) — implementation, CI runs, per-gate
   findings, deterministic fixtures, AC verification, caveats, integrity statement.
