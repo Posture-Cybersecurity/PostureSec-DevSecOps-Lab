@@ -1,32 +1,31 @@
 # ==============================================================
 # PostureSec - Posture Cybersecurity Platform - Kubernetes Manifest
-# Includes: Secrets, PVC (EBS), DB, Backend, Frontend
+# Sprint 6 (DSO-601..604). PostgreSQL is a StatefulSet (DSO-602).
+# Non-sensitive config is a ConfigMap; NO secrets are hardcoded here.
 #
-# Apply order:
-#   1. kubectl apply -f k8s/namespace.yaml
-#   2. kubectl apply -f k8s/ghcr-secret.yaml   (see ghcr-secret.yaml.example)
-#   3. kubectl apply -f k8s/posturesec.yaml
+# Secrets are created out-of-band BEFORE applying this file (DSO-603 order:
+# namespace -> secrets -> configmaps -> deployments -> services):
+#   kubectl apply -f k8s/namespace.yaml
+#   kubectl create secret generic posturesec-db-secret -n posturesec \
+#     --from-literal=POSTGRES_USER=... --from-literal=POSTGRES_PASSWORD=... \
+#     --from-literal=POSTGRES_DB=...
+#   kubectl create secret docker-registry ghcr-secret -n posturesec \
+#     --docker-server=ghcr.io --docker-username=<gh-user> --docker-password=<read:packages token>
+#   kubectl apply -f k8s/posturesec.yaml
 # ==============================================================
 
-# ---- Database Secret ----
-# In production, use External Secrets Operator or Sealed Secrets.
-# This is base64 encoded for demo purposes.
-# echo -n 'posturesec_user' | base64 -> cG9zdHVyZXNlY191c2Vy
-# echo -n 'posturesec_pass_2026' | base64 -> cG9zdHVyZXNlY19wYXNzXzIwMjY=
-# echo -n 'posturesec_db' | base64 -> cG9zdHVyZXNlY19kYg==
-
+# ---- Non-sensitive application config ----
 apiVersion: v1
-kind: Secret
+kind: ConfigMap
 metadata:
-  name: posturesec-db-secret
+  name: posturesec-config
   namespace: posturesec
   labels:
     app.kubernetes.io/part-of: posturesec
-type: Opaque
 data:
-  POSTGRES_USER: cG9zdHVyZXNlY191c2Vy
-  POSTGRES_PASSWORD: cG9zdHVyZXNlY19wYXNzXzIwMjY=
-  POSTGRES_DB: cG9zdHVyZXNlY19kYg==
+  DB_HOST: "posturesec-db"
+  DB_PORT: "5432"
+  PORT: "5000"
 
 ---
 # ---- EBS StorageClass (gp3) ----
@@ -43,27 +42,11 @@ volumeBindingMode: WaitForFirstConsumer
 allowVolumeExpansion: true
 
 ---
-# ---- PersistentVolumeClaim for PostgreSQL (EBS) ----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: posturesec-db-pvc
-  namespace: posturesec
-  labels:
-    app.kubernetes.io/part-of: posturesec
-    app.kubernetes.io/component: database
-spec:
-  accessModes:
-    - ReadWriteOnce
-  storageClassName: posturesec-ebs-sc
-  resources:
-    requests:
-      storage: 10Gi
-
----
-# ---- PostgreSQL Deployment ----
+# ---- PostgreSQL StatefulSet (DSO-602) ----
+# StatefulSet (not Deployment) for stable identity + per-replica PVC via
+# volumeClaimTemplates. Data persists across pod delete/reschedule.
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
   name: posturesec-db
   namespace: posturesec
@@ -72,9 +55,8 @@ metadata:
     app.kubernetes.io/part-of: posturesec
     app.kubernetes.io/component: database
 spec:
+  serviceName: posturesec-db
   replicas: 1
-  strategy:
-    type: Recreate # Required for RWO volumes
   selector:
     matchLabels:
       app.kubernetes.io/name: posturesec-db
@@ -85,8 +67,11 @@ spec:
         app.kubernetes.io/part-of: posturesec
         app.kubernetes.io/component: database
     spec:
-      # Security: don't automount service account token (DB doesn't need K8s API)
+      # Security: DB doesn't need the K8s API
       automountServiceAccountToken: false
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       tolerations:
         - key: "karpenter.sh/disrupted"
           operator: "Exists"
@@ -111,7 +96,6 @@ spec:
             limits:
               cpu: 500m
               memory: 512Mi
-          # Security context
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: false # Postgres needs write access
@@ -128,13 +112,22 @@ spec:
             initialDelaySeconds: 5
             periodSeconds: 5
             timeoutSeconds: 3
-      volumes:
-        - name: db-storage
-          persistentVolumeClaim:
-            claimName: posturesec-db-pvc
+  volumeClaimTemplates:
+    - metadata:
+        name: db-storage
+        labels:
+          app.kubernetes.io/part-of: posturesec
+          app.kubernetes.io/component: database
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: posturesec-ebs-sc
+        resources:
+          requests:
+            storage: 10Gi
 
 ---
-# ---- PostgreSQL Service (ClusterIP - internal only) ----
+# ---- PostgreSQL headless Service (StatefulSet serviceName; ClusterIP: None) ----
 apiVersion: v1
 kind: Service
 metadata:
@@ -145,7 +138,7 @@ metadata:
     app.kubernetes.io/part-of: posturesec
     app.kubernetes.io/component: database
 spec:
-  type: ClusterIP
+  clusterIP: None
   selector:
     app.kubernetes.io/name: posturesec-db
   ports:
@@ -177,6 +170,9 @@ spec:
         app.kubernetes.io/component: backend
     spec:
       automountServiceAccountToken: false
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       imagePullSecrets:
         - name: ghcr-secret
       tolerations:
@@ -203,13 +199,10 @@ spec:
           ports:
             - containerPort: 5000
               protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: posturesec-config
           env:
-            - name: PORT
-              value: "5000"
-            - name: DB_HOST
-              value: "posturesec-db"
-            - name: DB_PORT
-              value: "5432"
             - name: DB_USER
               valueFrom:
                 secretKeyRef:
@@ -232,7 +225,6 @@ spec:
             limits:
               cpu: 300m
               memory: 256Mi
-          # Security context
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -300,6 +292,9 @@ spec:
         app.kubernetes.io/component: frontend
     spec:
       automountServiceAccountToken: false
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       imagePullSecrets:
         - name: ghcr-secret
       tolerations:
@@ -342,10 +337,9 @@ spec:
             periodSeconds: 5
 
 ---
-# ---- Frontend Service (NodePort - for access via port-forward or node IP) ----
-# NOTE: Changed from LoadBalancer because this AWS account does not support
-# creating load balancers. Use `kubectl port-forward svc/posturesec-frontend 8080:80 -n posturesec`
-# to access the frontend locally.
+# ---- Frontend Service (NodePort) ----
+# NOTE: NodePort, not LoadBalancer (DSO-604): this AWS account cannot create
+# ELBs. Access via `kubectl port-forward svc/posturesec-frontend 8080:80 -n posturesec`.
 apiVersion: v1
 kind: Service
 metadata:
@@ -365,7 +359,19 @@ spec:
       protocol: TCP
 
 ---
-# ---- NetworkPolicy: DB only accepts traffic from Backend ----
+# ---- NetworkPolicy: default-deny all ingress in the namespace (DSO-604) ----
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: posturesec
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+
+---
+# ---- NetworkPolicy: DB accepts traffic ONLY from Backend ----
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -387,7 +393,7 @@ spec:
           protocol: TCP
 
 ---
-# ---- NetworkPolicy: Backend accepts traffic from Frontend only ----
+# ---- NetworkPolicy: Backend accepts traffic ONLY from Frontend ----
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -407,4 +413,21 @@ spec:
       ports:
         - port: 5000
           protocol: TCP
-          
+
+---
+# ---- NetworkPolicy: Frontend is the public entrypoint (allow :8080) ----
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: posturesec-frontend-allow-ingress
+  namespace: posturesec
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: posturesec-frontend
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - port: 8080
+          protocol: TCP
