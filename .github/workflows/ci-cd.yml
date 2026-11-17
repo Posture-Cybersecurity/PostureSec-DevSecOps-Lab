@@ -12,9 +12,9 @@ name: PostureSec DevSecOps Pipeline
 
 on:
   push:
-    branches: ["*"]
+    branches: ["**"] # ** matches slashes; "*" alone skips feature/* branches
   pull_request:
-    branches: ["*"]
+    branches: ["**"]
 
 # Security: restrict default permissions to read-only
 permissions:
