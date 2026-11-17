@@ -3,7 +3,9 @@
 # ==============================================================
 # Triggers on every push and pull request.
 # Stages: Lint → SCA → Build → Image Scan → IaC Scan → Deploy Manifest Update
-# Demo: continue-on-error on all jobs/steps so scans can fail without blocking.
+# ENFORCING: the quality/security gates (lint, SCA, image scan, IaC scan,
+# Dockerfile lint) fail the run on violation. Only the deploy bot
+# (update-manifest) stays non-blocking, pending DSO-704.
 # ==============================================================
 
 name: PostureSec DevSecOps Pipeline
@@ -23,23 +25,20 @@ env:
 
 jobs:
   # ==============================================================
-  # STAGE 1: Linting
+  # STAGE 1: Linting  (GATE — blocks on lint errors)
   # ==============================================================
   lint:
     name: "Lint Code"
     runs-on: ubuntu-latest
-    continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
         component: [backend, frontend]
     steps:
       - name: Checkout code
-        continue-on-error: true
         uses: actions/checkout@v4
 
       - name: Setup Node.js
-        continue-on-error: true
         uses: actions/setup-node@v4
         with:
           node-version: "20"
@@ -47,22 +46,20 @@ jobs:
           cache-dependency-path: "${{ matrix.component }}/package-lock.json"
 
       - name: Install dependencies
-        continue-on-error: true
         working-directory: ${{ matrix.component }}
         run: npm ci
 
       - name: Run ESLint
-        continue-on-error: true
         working-directory: ${{ matrix.component }}
         run: npm run lint
 
   # ==============================================================
   # STAGE 2: Software Composition Analysis (SCA) — Dependency Audit
+  # GATE — blocks on HIGH/CRITICAL advisories
   # ==============================================================
   sca:
     name: "Dependency Audit"
     runs-on: ubuntu-latest
-    continue-on-error: true
     needs: lint
     strategy:
       fail-fast: false
@@ -70,11 +67,9 @@ jobs:
         component: [backend, frontend]
     steps:
       - name: Checkout code
-        continue-on-error: true
         uses: actions/checkout@v4
 
       - name: Setup Node.js
-        continue-on-error: true
         uses: actions/setup-node@v4
         with:
           node-version: "20"
@@ -82,24 +77,20 @@ jobs:
           cache-dependency-path: "${{ matrix.component }}/package-lock.json"
 
       - name: Install dependencies
-        continue-on-error: true
         working-directory: ${{ matrix.component }}
         run: npm ci
 
-      # npm audit for known vulnerabilities (fail on high/critical)
+      # Fail the gate on known HIGH/CRITICAL vulnerabilities.
       - name: npm audit
-        continue-on-error: true
         working-directory: ${{ matrix.component }}
-        run: npm audit --audit-level=high || true
-        # `|| true` to not fail on moderate — adjust in prod
+        run: npm audit --audit-level=high
 
   # ==============================================================
-  # STAGE 3: Build & Push Container Images
+  # STAGE 3: Build & Push Container Images  (blocks on build failure)
   # ==============================================================
   build:
     name: "Build ${{ matrix.component }}"
     runs-on: ubuntu-latest
-    continue-on-error: true
     needs: sca
     permissions:
       contents: read
@@ -110,12 +101,10 @@ jobs:
         component: [backend, frontend]
     steps:
       - name: Checkout code
-        continue-on-error: true
         uses: actions/checkout@v4
 
       # GHCR requires lowercase repository paths in image references
       - name: Set GHCR image paths
-        continue-on-error: true
         run: |
           REPO=$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')
           echo "GHCR_REPO=ghcr.io/${REPO}" >> $GITHUB_ENV
@@ -123,11 +112,9 @@ jobs:
           echo "FRONTEND_IMAGE=ghcr.io/${REPO}/posturesec-frontend" >> $GITHUB_ENV
 
       - name: Set up Docker Buildx
-        continue-on-error: true
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to GitHub Container Registry
-        continue-on-error: true
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -135,7 +122,6 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Extract metadata (tags, labels)
-        continue-on-error: true
         id: meta
         uses: docker/metadata-action@v5
         with:
@@ -146,7 +132,6 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push image
-        continue-on-error: true
         uses: docker/build-push-action@v6
         with:
           context: ./${{ matrix.component }}
@@ -162,11 +147,11 @@ jobs:
 
   # ==============================================================
   # STAGE 4: Container Image Scanning (Trivy)
+  # GATE — blocks on CRITICAL/HIGH OS or library vulns (fixed only)
   # ==============================================================
   image-scan:
     name: "Scan ${{ matrix.component }} Image"
     runs-on: ubuntu-latest
-    continue-on-error: true
     needs: build
     strategy:
       fail-fast: false
@@ -174,16 +159,13 @@ jobs:
         component: [backend, frontend]
     steps:
       - name: Checkout code
-        continue-on-error: true
         uses: actions/checkout@v4
 
       - name: Build image for scanning
-        continue-on-error: true
         run: |
           docker build -t posturesec-${{ matrix.component }}:scan ./${{ matrix.component }}
 
       - name: Run Trivy vulnerability scanner
-        continue-on-error: true
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: "posturesec-${{ matrix.component }}:scan"
@@ -196,19 +178,17 @@ jobs:
 
   # ==============================================================
   # STAGE 5: IaC Security Scan (Checkov) — Terraform + K8s
+  # Terraform = GATE (soft_fail:false). K8s = documented soft exception.
   # ==============================================================
   iac-scan:
     name: "IaC Security Scan"
     runs-on: ubuntu-latest
-    continue-on-error: true
     needs: lint
     steps:
       - name: Checkout code
-        continue-on-error: true
         uses: actions/checkout@v4
 
       - name: Run Checkov on Terraform
-        continue-on-error: true
         uses: bridgecrewio/checkov-action@v12
         with:
           directory: terraform/
@@ -217,33 +197,33 @@ jobs:
           skip_check: CKV_AWS_39,CKV_AWS_58  # Public EKS endpoint (intentional for dev)
           output_format: cli
 
+      # Documented, scoped exception: the K8s manifests include intentional
+      # lab choices (e.g. NodePort, no LoadBalancer) that trip generic checks.
+      # Kept soft until DSO-703 follow-up triages per-check skips; findings are
+      # still printed. This is NOT a blanket demo bypass.
       - name: Run Checkov on Kubernetes manifests
-        continue-on-error: true
         uses: bridgecrewio/checkov-action@v12
         with:
           directory: k8s/
           framework: kubernetes
-          soft_fail: true  # Soft fail for K8s (some checks may not apply)
+          soft_fail: true
           output_format: cli
 
   # ==============================================================
-  # STAGE 6: Dockerfile Lint (Hadolint)
+  # STAGE 6: Dockerfile Lint (Hadolint)  (GATE — blocks at warning+)
   # ==============================================================
   dockerfile-lint:
     name: "Dockerfile Lint"
     runs-on: ubuntu-latest
-    continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
         component: [backend, frontend]
     steps:
       - name: Checkout code
-        continue-on-error: true
         uses: actions/checkout@v4
 
       - name: Run Hadolint
-        continue-on-error: true
         uses: hadolint/hadolint-action@v3.1.0
         with:
           dockerfile: ${{ matrix.component }}/Dockerfile
@@ -251,36 +231,34 @@ jobs:
 
   # ==============================================================
   # STAGE 7: Update K8s Manifest with New Image Tag
-  # Only runs on push to main (not on PRs)
+  # Only runs on push (not on PRs). NON-BLOCKING by design — this is the
+  # deploy bot, hardened in DSO-704, not a security gate.
   # ==============================================================
   update-manifest:
     name: "Update K8s Manifest"
     runs-on: ubuntu-latest
     continue-on-error: true
     if: github.event_name == 'push'
+    needs: [image-scan, iac-scan, dockerfile-lint]
     permissions:
       contents: write # Needed to push manifest changes
     steps:
       - name: Checkout code
-        continue-on-error: true
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Get short SHA
-        continue-on-error: true
         id: sha
         run: echo "short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
 
       - name: Set GHCR image paths
-        continue-on-error: true
         run: |
           REPO=$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')
           echo "BACKEND_IMAGE=ghcr.io/${REPO}/posturesec-backend" >> $GITHUB_ENV
           echo "FRONTEND_IMAGE=ghcr.io/${REPO}/posturesec-frontend" >> $GITHUB_ENV
 
       - name: Update K8s manifest with new image tags
-        continue-on-error: true
         run: |
           IMAGE_TAG=${{ steps.sha.outputs.short }}
 
@@ -300,7 +278,6 @@ jobs:
           grep -n "image:" k8s/posturesec.yaml
 
       - name: Commit and push manifest update
-        continue-on-error: true
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
