@@ -8,7 +8,7 @@ Branch `feature/sprint-7-gitops-cicd-security`. Work validated on GitHub Actions
 |--------|--------|-------|
 | **DSO-703** Pipeline gates: lint, SCA & scanners | ✅ **PASS** | All five gates enforce **and** run independently; each proven by a deterministic fixture; publish/deploy gated |
 | **DSO-701** GitOps principles & install Argo CD | ◑ **IMPLEMENTED** | Argo CD v3.6.1 vendored + pinned (`argocd/`) + GitOps doc; manifest offline-validated (60 docs, 7 workloads); **live cluster install deferred** (local minikube 1.34 ↔ Docker 29 skew; binary upgrade gated) |
-| DSO-702 Wire POSTURESec to Argo CD | ⬜ not started | manifests exist; needs an Argo CD `Application` |
+| **DSO-702** Wire POSTURESec to Argo CD | ◑ **IMPLEMENTED** | Argo CD `Application` syncing `k8s/`; validates against the vendored Application CRD; manages **no** secrets; **live sync deferred** (no cluster) |
 | DSO-704 CI bot closes the loop | ⬜ not started | depends on 701/702; manifest-update bot already present |
 | **DSO-705** Secret hygiene: push protection & rotation | ✅ **PASS** | gitleaks gate enforces + blocks deploy; deterministic fixtures; caught & remediated a hardcoded DB Secret; rotation runbook; push-protection flagged (admin) |
 
@@ -36,6 +36,13 @@ Branch `feature/sprint-7-gitops-cicd-security`. Work validated on GitHub Actions
   teaching notes and questions.
 - Install assets: [`../../argocd/`](../../argocd/README.md) — `namespace.yaml` + pinned
   `install.yaml` (Argo CD v3.6.1).
+
+## DSO-702 contents
+- [`08-DSO-702-ARGOCD-APPLICATION.md`](08-DSO-702-ARGOCD-APPLICATION.md) — the Argo CD
+  `Application` wiring `k8s/`, secret handling (none managed), sync policy + drift/self-heal,
+  offline validation (CRD-schema), security, teaching notes, deferred live-sync steps.
+- Assets: [`../../argocd/application-posturesec.yaml`](../../argocd/application-posturesec.yaml),
+  [`../../argocd/repo-secret.yaml.example`](../../argocd/repo-secret.yaml.example).
 
 ## Key runs (evidence)
 | Run | Workflow | Result | Shows |

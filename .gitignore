@@ -15,6 +15,7 @@ terraform/crash.log
 k8s/dockerhub-secret.yaml
 k8s/ghcr-secret.yaml
 k8s/posturesec-db-secret.yaml
+argocd/repo-secret.yaml
 
 # OS
 .DS_Store

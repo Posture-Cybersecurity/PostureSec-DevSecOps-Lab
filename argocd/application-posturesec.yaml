@@ -1,0 +1,32 @@
+# DSO-702 — wire PostureSec to Argo CD.
+# Argo CD continuously syncs the repo's k8s/ path into the posturesec namespace.
+# Secrets (posturesec-db-secret, ghcr-secret) are created OUT-OF-BAND and are NOT
+# managed here (DSO-705) — the k8s/ path no longer contains any Secret manifest, so
+# Argo CD never stores or prunes a credential.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: posturesec
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io # cascade-delete managed resources when the App is deleted
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/Posture-Cybersecurity/PostureSec-DevSecOps-Lab.git
+    # Branch Argo CD tracks. The DSO-704 CI bot commits image-tag bumps here and Argo CD
+    # syncs them. In production, track the promotion branch (e.g. main) instead.
+    targetRevision: feature/sprint-7-gitops-cicd-security
+    path: k8s # applies k8s/*.yaml (the .yaml.example templates are ignored by extension)
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: posturesec
+  syncPolicy:
+    automated:
+      prune: true # remove resources deleted from Git
+      selfHeal: true # revert out-of-band kubectl changes back to Git (drift control)
+    syncOptions:
+      - CreateNamespace=true
+      - ApplyOutOfSyncOnly=true
+  # Tolerate benign drift on fields controllers mutate.
+  revisionHistoryLimit: 10
