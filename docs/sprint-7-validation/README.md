@@ -7,7 +7,7 @@ Branch `feature/sprint-7-gitops-cicd-security`. Work validated on GitHub Actions
 | Ticket | Status | Notes |
 |--------|--------|-------|
 | **DSO-703** Pipeline gates: lint, SCA & scanners | ✅ **PASS** | All five gates enforce **and** run independently; each proven by a deterministic fixture; publish/deploy gated |
-| DSO-701 GitOps principles & install Argo CD | ⬜ not started | greenfield; needs a cluster (local kind for test) |
+| **DSO-701** GitOps principles & install Argo CD | ◑ **IMPLEMENTED** | Argo CD v3.6.1 vendored + pinned (`argocd/`) + GitOps doc; manifest offline-validated (60 docs, 7 workloads); **live cluster install deferred** (local minikube 1.34 ↔ Docker 29 skew; binary upgrade gated) |
 | DSO-702 Wire POSTURESec to Argo CD | ⬜ not started | manifests exist; needs an Argo CD `Application` |
 | DSO-704 CI bot closes the loop | ⬜ not started | depends on 701/702; manifest-update bot already present |
 | **DSO-705** Secret hygiene: push protection & rotation | ✅ **PASS** | gitleaks gate enforces + blocks deploy; deterministic fixtures; caught & remediated a hardcoded DB Secret; rotation runbook; push-protection flagged (admin) |
@@ -29,6 +29,13 @@ Branch `feature/sprint-7-gitops-cicd-security`. Work validated on GitHub Actions
 - [`06-DSO-705-STUDENT-EXERCISE.md`](06-DSO-705-STUDENT-EXERCISE.md) — exercise, rubric,
   troubleshooting.
 - [`DSO-705-SECRET-ROTATION.md`](DSO-705-SECRET-ROTATION.md) — rotation runbook (GHCR, Postgres, Argo CD).
+
+## DSO-701 contents
+- [`07-DSO-701-GITOPS-AND-ARGOCD.md`](07-DSO-701-GITOPS-AND-ARGOCD.md) — GitOps principles,
+  the vendored Argo CD install, access + hardening, validation (offline; live deferred),
+  teaching notes and questions.
+- Install assets: [`../../argocd/`](../../argocd/README.md) — `namespace.yaml` + pinned
+  `install.yaml` (Argo CD v3.6.1).
 
 ## Key runs (evidence)
 | Run | Workflow | Result | Shows |
