@@ -12,6 +12,11 @@ Branch `feature/sprint-7-gitops-cicd-security`. Work validated on GitHub Actions
 | **DSO-704** CI bot closes the loop | ◑ **IMPLEMENTED** | manifest-update bot (gated behind the scanners) + GitOps hand-off report + sticky PR gate-summary comment; YAML-validated; **live loop deferred** (no cluster) |
 | **DSO-705** Secret hygiene: push protection & rotation | ✅ **PASS** | gitleaks gate enforces + blocks deploy; deterministic fixtures; caught & remediated a hardcoded DB Secret; rotation runbook; push-protection flagged (admin) |
 
+## Local validation
+- [`LOCAL-VALIDATION.md`](LOCAL-VALIDATION.md) — the scanner fixtures re-run **locally**
+  (npm audit / Trivy pinned-DB / Checkov, vuln→fail + clean→pass), the decouple + deploy-blocking
+  invariants, and the Task 2 (live GitOps) blocker + minimum setup.
+
 ## Capstone (read these first)
 - [`00-SPRINT-7-INSTRUCTOR-GUIDE.md`](00-SPRINT-7-INSTRUCTOR-GUIDE.md) — consolidated guide
   tying all five tickets together (arc, teaching sequence, honest status, prerequisites).
