@@ -14,6 +14,7 @@ terraform/crash.log
 *.tar
 k8s/dockerhub-secret.yaml
 k8s/ghcr-secret.yaml
+k8s/posturesec-db-secret.yaml
 
 # OS
 .DS_Store

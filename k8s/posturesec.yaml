@@ -5,30 +5,19 @@
 # Apply order:
 #   1. kubectl apply -f k8s/namespace.yaml
 #   2. kubectl apply -f k8s/ghcr-secret.yaml   (see ghcr-secret.yaml.example)
-#   3. kubectl apply -f k8s/posturesec.yaml
+#   3. Create posturesec-db-secret out-of-band (see posturesec-db-secret.yaml.example)
+#   4. kubectl apply -f k8s/posturesec.yaml
 # ==============================================================
 
-# ---- Database Secret ----
-# In production, use External Secrets Operator or Sealed Secrets.
-# This is base64 encoded for demo purposes.
-# echo -n 'posturesec_user' | base64 -> cG9zdHVyZXNlY191c2Vy
-# echo -n 'posturesec_pass_2026' | base64 -> cG9zdHVyZXNlY19wYXNzXzIwMjY=
-# echo -n 'posturesec_db' | base64 -> cG9zdHVyZXNlY19kYg==
+# ---- Database Secret (DSO-705: NOT committed) ----
+# posturesec-db-secret holds the PostgreSQL credentials. It is created out-of-band
+# (never hardcoded here) — see k8s/posturesec-db-secret.yaml.example, or:
+#   kubectl create secret generic posturesec-db-secret -n posturesec \
+#     --from-literal=POSTGRES_USER=posturesec_user \
+#     --from-literal=POSTGRES_PASSWORD='<strong-password>' \
+#     --from-literal=POSTGRES_DB=posturesec_db
+# The db StatefulSet (envFrom.secretRef) and backend (env.secretKeyRef) reference it by name.
 
-apiVersion: v1
-kind: Secret
-metadata:
-  name: posturesec-db-secret
-  namespace: posturesec
-  labels:
-    app.kubernetes.io/part-of: posturesec
-type: Opaque
-data:
-  POSTGRES_USER: cG9zdHVyZXNlY191c2Vy
-  POSTGRES_PASSWORD: cG9zdHVyZXNlY19wYXNzXzIwMjY=
-  POSTGRES_DB: cG9zdHVyZXNlY19kYg==
-
----
 # ---- EBS StorageClass (gp3) ----
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
