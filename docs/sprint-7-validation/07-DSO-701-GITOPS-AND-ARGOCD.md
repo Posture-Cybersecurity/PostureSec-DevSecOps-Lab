@@ -49,13 +49,12 @@ YAML — **60 documents**, Argo CD **v3.6.1**, with all core components present:
 `argocd-notifications-controller`, plus 3 CRDs, RBAC and NetworkPolicies; `namespace.yaml`
 is valid.
 
-**Live install (deferred — honest):** a disposable-cluster install could **not** be
-completed in this environment. The available `minikube v1.34.0` cannot drive the host's
-`Docker 29.8.1` (its `docker version` probe renders `<no value>` and aborts with
-`PROVIDER_DOCKER_NOT_RUNNING`), and upgrading minikube / installing kind (downloading and
-running a new binary) is gated here. The install is therefore validated at the manifest
-level only. Run §3 on a working cluster — an upgraded local minikube/kind, or the EKS
-cluster provisioned for DSO-702 — to finish it; the steps are reproducible as written.
+**Live install (PROVEN):** Argo CD v3.6.1 was installed on a disposable **k3s-in-Docker**
+cluster and **all 7 pods reached Running** — full reproduce-it + teaching steps and captured
+evidence are in [`10-DSO-701-702-704-LIVE-GITOPS.md`](10-DSO-701-702-704-LIVE-GITOPS.md).
+(An initial `minikube v1.34.0` attempt failed on a minikube ↔ `Docker 29` skew; k3s-in-Docker
+was the working alternative, and the Argo CD images had to be side-loaded because the cluster
+could not reach quay.io/ECR directly — both documented as teaching gotchas in doc 10.)
 
 ## 6. Security considerations
 - **Rotate the bootstrap admin password immediately** and delete `argocd-initial-admin-secret`.

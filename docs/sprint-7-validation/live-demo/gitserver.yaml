@@ -1,0 +1,50 @@
+# Live-demo scaffolding (DSO-701/702/704 runbook, doc 10): an in-cluster git-daemon
+# serving a bare repo over git:// — the GitOps source for the representative demo app.
+# NOTE: ephemeral storage; a k3s restart wipes the repo (add a PVC for durability).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gitops-demo
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gitserver
+  namespace: gitops-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gitserver
+  template:
+    metadata:
+      labels:
+        app: gitserver
+    spec:
+      containers:
+        - name: gitserver
+          image: alpine:3.20
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              apk add --no-cache git git-daemon >/dev/null 2>&1
+              git config --global user.email ci@posturesec.local
+              git config --global user.name posturesec-ci
+              git config --global init.defaultBranch main
+              [ -d /srv/git/demo.git ] || git init --bare /srv/git/demo.git
+              echo "git daemon serving /srv/git on :9418"
+              exec git daemon --verbose --reuseaddr --export-all --base-path=/srv/git /srv/git
+          ports:
+            - containerPort: 9418
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gitserver
+  namespace: gitops-demo
+spec:
+  selector:
+    app: gitserver
+  ports:
+    - port: 9418
+      targetPort: 9418

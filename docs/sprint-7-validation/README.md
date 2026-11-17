@@ -7,9 +7,9 @@ Branch `feature/sprint-7-gitops-cicd-security`. Work validated on GitHub Actions
 | Ticket | Status | Notes |
 |--------|--------|-------|
 | **DSO-703** Pipeline gates: lint, SCA & scanners | ✅ **PASS** | All five gates enforce **and** run independently; each proven by a deterministic fixture; publish/deploy gated |
-| **DSO-701** GitOps principles & install Argo CD | ◑ **IMPLEMENTED** | Argo CD v3.6.1 vendored + pinned (`argocd/`) + GitOps doc; manifest offline-validated (60 docs, 7 workloads); **live cluster install deferred** (local minikube 1.34 ↔ Docker 29 skew; binary upgrade gated) |
-| **DSO-702** Wire POSTURESec to Argo CD | ◑ **IMPLEMENTED** | Argo CD `Application` syncing `k8s/`; validates against the vendored Application CRD; manages **no** secrets; **live sync deferred** (no cluster) |
-| **DSO-704** CI bot closes the loop | ◑ **IMPLEMENTED** | manifest-update bot (gated behind the scanners) + GitOps hand-off report + sticky PR gate-summary comment; YAML-validated; **live loop deferred** (no cluster) |
+| **DSO-701** GitOps principles & install Argo CD | ✅ **PASS (live)** | Argo CD v3.6.1 vendored + pinned; **installed live on a disposable k3s cluster — all 7 pods Running**. See [`10-…LIVE-GITOPS.md`](10-DSO-701-702-704-LIVE-GITOPS.md) |
+| **DSO-702** Wire POSTURESec to Argo CD | ✅ **PASS (live)** | Argo CD `Application` validated against the CRD and **live: auto-synced a Git repo → deployed app → Synced/Healthy @ 212b867**; manages no secrets. Doc 10 |
+| **DSO-704** CI bot closes the loop | ✅ **PASS (live)** | gated manifest bot + GitOps hand-off + PR gate-summary; **live: CI-bot bump `8c76eab` → synced v2, then `git revert` `da55757` → reconciled to v1, Healthy throughout**. Doc 10 |
 | **DSO-705** Secret hygiene: push protection & rotation | ✅ **PASS** | gitleaks gate enforces + blocks deploy; deterministic fixtures; caught & remediated a hardcoded DB Secret; rotation runbook; push-protection flagged (admin) |
 
 ## Local validation
@@ -43,9 +43,16 @@ Branch `feature/sprint-7-gitops-cicd-security`. Work validated on GitHub Actions
   troubleshooting.
 - [`DSO-705-SECRET-ROTATION.md`](DSO-705-SECRET-ROTATION.md) — rotation runbook (GHCR, Postgres, Argo CD).
 
+## Live GitOps validation (DSO-701/702/704)
+- [`10-DSO-701-702-704-LIVE-GITOPS.md`](10-DSO-701-702-704-LIVE-GITOPS.md) — **reproduce-it +
+  teaching** runbook: disposable k3s-in-Docker → install Argo CD → Git source → Application
+  auto-sync/deploy/health → CI-bot bump → `git revert` rollback → reconcile → cleanup, with the
+  real captured results and the genuine gotchas (Windows path mangling, registry-egress
+  side-load, the `argocd-redis` cascade, ephemeral Git state).
+
 ## DSO-701 contents
 - [`07-DSO-701-GITOPS-AND-ARGOCD.md`](07-DSO-701-GITOPS-AND-ARGOCD.md) — GitOps principles,
-  the vendored Argo CD install, access + hardening, validation (offline; live deferred),
+  the vendored Argo CD install, access + hardening, validation (offline + **live**, see doc 10),
   teaching notes and questions.
 - Install assets: [`../../argocd/`](../../argocd/README.md) — `namespace.yaml` + pinned
   `install.yaml` (Argo CD v3.6.1).
@@ -53,7 +60,7 @@ Branch `feature/sprint-7-gitops-cicd-security`. Work validated on GitHub Actions
 ## DSO-702 contents
 - [`08-DSO-702-ARGOCD-APPLICATION.md`](08-DSO-702-ARGOCD-APPLICATION.md) — the Argo CD
   `Application` wiring `k8s/`, secret handling (none managed), sync policy + drift/self-heal,
-  offline validation (CRD-schema), security, teaching notes, deferred live-sync steps.
+  offline validation (CRD-schema), security, teaching notes; live sync proven (doc 10).
 - Assets: [`../../argocd/application-posturesec.yaml`](../../argocd/application-posturesec.yaml),
   [`../../argocd/repo-secret.yaml.example`](../../argocd/repo-secret.yaml.example).
 
@@ -69,7 +76,7 @@ Branch `feature/sprint-7-gitops-cicd-security`. Work validated on GitHub Actions
 ## DSO-704 contents
 - [`09-DSO-704-CI-BOT-LOOP.md`](09-DSO-704-CI-BOT-LOOP.md) — the closed CI→Git→Argo CD loop,
   the manifest-update bot, PR feedback, loop-safety (`[skip ci]`), offline validation,
-  teaching notes, and deferred live-proof steps.
+  teaching notes; live loop proven (doc 10).
 
 ## One-line summary
 DSO-703 turned a green-by-design "security" pipeline into one where **every gate enforces,

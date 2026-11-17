@@ -28,7 +28,7 @@ hands deployment to **GitOps** so the cluster pulls reviewed, declared state fro
 ## Honest delivery status
 - **Live-proven in CI (do these live):** DSO-703, DSO-705, and the War Room — all run on
   GitHub Actions with no cluster.
-- **Offline-validated, live-deferred:** DSO-701/702/704 need a Kubernetes cluster. In this
+- **Proven live on a disposable k3s cluster:** DSO-701/702/704 were demonstrated end-to-end — install → sync → deploy → CI-bot bump → `git revert` rollback → reconcile, Healthy throughout (see [`10-DSO-701-702-704-LIVE-GITOPS.md`](10-DSO-701-702-704-LIVE-GITOPS.md)); reproduce on any Kubernetes cluster. (An initial minikube attempt failed on a minikube-1.34 ↔ Docker-29 skew; k3s was the working alternative.) In this
   build environment none was available (minikube 1.34 ↔ Docker 29 incompatibility; binary
   upgrades gated). The manifests are validated (701/702 against the real Argo CD CRD schema);
   to demo them live, give students a disposable **kind**/**minikube** (≥1.39) cluster, or an

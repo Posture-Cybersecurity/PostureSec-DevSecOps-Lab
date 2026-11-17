@@ -1,0 +1,23 @@
+# Live-demo Argo CD Application (DSO-701/702/704 runbook, doc 10). Representative app
+# (public image) served by the in-cluster git daemon, so the GitOps loop is proven without
+# owner-controlled private-repo / private-GHCR credentials. Mirrors argocd/application-posturesec.yaml.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: demo-app
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: git://gitserver.gitops-demo.svc:9418/demo.git
+    targetRevision: main
+    path: .
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: demo
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

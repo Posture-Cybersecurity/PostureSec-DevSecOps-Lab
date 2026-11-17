@@ -91,11 +91,11 @@ No `kubectl`. No cluster creds in CI.
 
 # Honest status
 - ✅ **Live-proven in CI:** DSO-703, DSO-705 (both run with no cluster).
-- ◑ **Offline-validated, live-deferred:** DSO-701/702/704 need a Kubernetes cluster
-  (unavailable in the build env). Manifests validated — 701/702 against the real Argo CD
-  CRD schema. Reproducible steps are in each ticket's doc.
+- ✅ **Proven live on a disposable k3s cluster:** DSO-701/702/704 — install → sync → deploy →
+  CI-bot bump → `git revert` rollback → reconcile, Healthy throughout (doc 10). An initial
+  minikube attempt hit a minikube-1.34 ↔ Docker-29 skew; k3s-in-Docker was the working path.
 
-**We don't fake a green checkmark. Deferred means deferred.**
+**We don't fake a green checkmark — and here it's green because it actually ran.**
 
 ---
 

@@ -49,7 +49,11 @@ the CI "bot" that writes the tag back to Git so the loop closes without anyone r
 - The actual bump→comment→sync behaviour needs a live run and a cluster (same deferral as
   DSO-701/702). The CI-side pieces are static-validatable; the Argo CD sync is the live part.
 
-## Deferred live proof (on a working cluster)
+## Live proof — DEMONSTRATED (see doc 10)
+The CI→Git→Argo CD loop — bump → sync → `git revert` rollback → reconcile, Healthy throughout —
+was proven **live** on a disposable k3s cluster with a representative app:
+[`10-DSO-701-702-704-LIVE-GITOPS.md`](10-DSO-701-702-704-LIVE-GITOPS.md) (bump `8c76eab` → v2,
+revert `da55757` → v1). To verify the loop for the **real** PostureSec app on a cluster:
 1. Merge/push to the tracked branch; watch `update-manifest` bump the tags and `[skip ci]`-commit.
 2. `argocd app get posturesec` → the new image SHA appears; app `Synced`/`Healthy`.
 3. Open a PR → confirm the `pr-summary` sticky comment shows the gate table.

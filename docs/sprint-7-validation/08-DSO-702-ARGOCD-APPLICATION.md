@@ -34,9 +34,12 @@ credentials. (For managed secrets at scale, use Sealed Secrets or the External S
 - Dry inventory of the sync path: `k8s/namespace.yaml`, `k8s/posturesec.yaml`; **no Secret**
   declared; `.example` files excluded.
 
-## Live sync (deferred — same blocker as DSO-701)
-A live sync needs a running Argo CD, which needs a cluster — unavailable here (minikube 1.34
-↔ Docker 29; binary upgrade gated). To complete it on a working cluster:
+## Live sync — PROVEN (on a representative app)
+The Application mechanics were demonstrated **live** on a disposable k3s cluster using a
+representative app (public image, in-cluster Git source): auto-sync → deploy → **Synced/Healthy
+@ 212b867**, plus the DSO-704 bump and `git revert` rollback. Full evidence + reproduce steps:
+[`10-DSO-701-702-704-LIVE-GITOPS.md`](10-DSO-701-702-704-LIVE-GITOPS.md). To wire the **real**
+PostureSec app (private repo + private GHCR → owner credentials), on a working cluster:
 ```bash
 # (Argo CD installed per DSO-701, repo credential created out-of-band)
 kubectl apply -f argocd/application-posturesec.yaml
