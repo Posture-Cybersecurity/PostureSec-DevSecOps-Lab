@@ -1,0 +1,220 @@
+# ==============================================================
+# DSO-703 — Deterministic Security Fixtures
+# ==============================================================
+# Proves each scanner gate enforces its policy against controlled inputs.
+# Separate from the application pipeline (ci-cd.yml): runs only on changes to
+# the fixtures or on manual dispatch, so it never affects app CI.
+# Each job PASSES when the scanner produces the expected result (a vulnerable
+# fixture makes the scanner fail; a clean fixture makes it pass).
+# See tests/security-fixtures/README.md for pins and expected findings.
+# ==============================================================
+
+name: Security Fixtures (DSO-703)
+
+on:
+  push:
+    paths:
+      - "tests/security-fixtures/**"
+      - ".github/workflows/security-fixtures.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  TRIVY_IMAGE: aquasec/trivy:0.76.2 # pinned Trivy binary
+  CHECKOV_VERSION: "3.4.5" # pinned Checkov engine
+
+jobs:
+  # ---------- SCA (npm audit) ----------
+  sca-vulnerable:
+    name: "SCA: vulnerable dep MUST fail"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: npm audit must fail (high/critical present)
+        working-directory: tests/security-fixtures/sca/vulnerable
+        run: |
+          npm ci
+          set +e
+          npm audit --audit-level=high | tee audit.txt
+          code=${PIPESTATUS[0]}
+          set -e
+          [ "$code" -ne 0 ] || { echo "::error::expected npm audit to FAIL, got exit 0"; exit 1; }
+          grep -q 'GHSA-35jh-r3h4-6jhm' audit.txt || { echo "::error::expected advisory GHSA-35jh-r3h4-6jhm not found"; exit 1; }
+          echo "PASS: SCA failed as expected and found GHSA-35jh-r3h4-6jhm"
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sca-vulnerable-report
+          path: tests/security-fixtures/sca/vulnerable/audit.txt
+
+  sca-clean:
+    name: "SCA: clean dep MUST pass"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: npm audit must pass
+        working-directory: tests/security-fixtures/sca/clean
+        run: |
+          npm ci
+          set +e
+          npm audit --audit-level=high | tee audit.txt
+          code=${PIPESTATUS[0]}
+          set -e
+          [ "$code" -eq 0 ] || { echo "::error::expected npm audit to PASS (exit 0), got $code"; exit 1; }
+          echo "PASS: clean dependency audited clean"
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sca-clean-report
+          path: tests/security-fixtures/sca/clean/audit.txt
+
+  # ---------- Trivy (image CVE) ----------
+  trivy-vulnerable:
+    name: "Trivy: known-CVE image MUST fail"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore frozen Trivy DB
+        uses: actions/cache@v4
+        with:
+          path: .trivy-cache
+          key: trivy-db-2026-11-17
+      - name: Populate pinned DB on cache miss
+        run: |
+          mkdir -p .trivy-cache
+          if [ ! -f .trivy-cache/db/trivy.db ]; then
+            docker run --rm -v "$PWD/.trivy-cache:/root/.cache/trivy" "$TRIVY_IMAGE" image --download-db-only
+          fi
+      - name: Trivy must fail on the vulnerable image + find CVE-2024-45491
+        run: |
+          IMG=$(grep -v '^#' tests/security-fixtures/trivy/vulnerable/image.ref | head -1)
+          set +e
+          docker run --rm -v "$PWD/.trivy-cache:/root/.cache/trivy" "$TRIVY_IMAGE" \
+            image --severity CRITICAL,HIGH --ignore-unfixed --skip-db-update --exit-code 1 "$IMG" | tee trivy-vuln.txt
+          code=${PIPESTATUS[0]}
+          set -e
+          [ "$code" -eq 1 ] || { echo "::error::expected Trivy exit 1, got $code"; exit 1; }
+          grep -q 'CVE-2024-45491' trivy-vuln.txt || { echo "::error::expected CVE-2024-45491 not found"; exit 1; }
+          echo "PASS: Trivy failed as expected and found CVE-2024-45491"
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-vulnerable-report
+          path: trivy-vuln.txt
+
+  trivy-clean:
+    name: "Trivy: clean image MUST pass"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore frozen Trivy DB
+        uses: actions/cache@v4
+        with:
+          path: .trivy-cache
+          key: trivy-db-2026-11-17
+      - name: Populate pinned DB on cache miss
+        run: |
+          mkdir -p .trivy-cache
+          if [ ! -f .trivy-cache/db/trivy.db ]; then
+            docker run --rm -v "$PWD/.trivy-cache:/root/.cache/trivy" "$TRIVY_IMAGE" image --download-db-only
+          fi
+      - name: Trivy must pass on the clean image
+        run: |
+          IMG=$(grep -v '^#' tests/security-fixtures/trivy/clean/image.ref | head -1)
+          set +e
+          docker run --rm -v "$PWD/.trivy-cache:/root/.cache/trivy" "$TRIVY_IMAGE" \
+            image --severity CRITICAL,HIGH --ignore-unfixed --skip-db-update --exit-code 1 "$IMG" | tee trivy-clean.txt
+          code=${PIPESTATUS[0]}
+          set -e
+          [ "$code" -eq 0 ] || { echo "::error::expected Trivy exit 0 (clean), got $code"; exit 1; }
+          echo "PASS: clean image scanned clean under the pinned DB"
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-clean-report
+          path: trivy-clean.txt
+
+  # ---------- Checkov (IaC) ----------
+  checkov-insecure:
+    name: "Checkov: insecure TF MUST fail"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install "checkov==${CHECKOV_VERSION}"
+      - name: Checkov must fail + flag CKV_AWS_24
+        run: |
+          set +e
+          checkov -d tests/security-fixtures/checkov/insecure --framework terraform --compact | tee checkov-insecure.txt
+          code=${PIPESTATUS[0]}
+          set -e
+          [ "$code" -ne 0 ] || { echo "::error::expected Checkov to FAIL, got exit 0"; exit 1; }
+          grep -q 'CKV_AWS_24' checkov-insecure.txt || { echo "::error::expected CKV_AWS_24 not found"; exit 1; }
+          echo "PASS: Checkov failed as expected on CKV_AWS_24"
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: checkov-insecure-report
+          path: checkov-insecure.txt
+
+  checkov-compliant:
+    name: "Checkov: compliant TF MUST pass"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install "checkov==${CHECKOV_VERSION}"
+      - name: Checkov must pass
+        run: |
+          set +e
+          checkov -d tests/security-fixtures/checkov/compliant --framework terraform --compact | tee checkov-compliant.txt
+          code=${PIPESTATUS[0]}
+          set -e
+          [ "$code" -eq 0 ] || { echo "::error::expected Checkov to PASS (exit 0), got $code"; exit 1; }
+          echo "PASS: compliant terraform passed"
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: checkov-compliant-report
+          path: checkov-compliant.txt
+
+  # ---------- Deploy-bot gating (structural) ----------
+  deploy-gating-structure:
+    name: "Deploy bot is gated behind the scanners"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: update-manifest must depend on security gates
+        run: |
+          python - <<'PY'
+          import yaml
+          wf = yaml.safe_load(open('.github/workflows/ci-cd.yml'))
+          um = wf['jobs'].get('update-manifest', {})
+          needs = um.get('needs', [])
+          if isinstance(needs, str):
+              needs = [needs]
+          gates = {'lint', 'sca', 'iac-scan', 'image-scan', 'dockerfile-lint', 'security-gates', 'build-push'}
+          assert set(needs) & gates, f"update-manifest.needs={needs} is not gated behind the scanners"
+          print("PASS: update-manifest is gated behind", needs)
+          PY

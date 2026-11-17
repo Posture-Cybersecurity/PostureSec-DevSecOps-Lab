@@ -1,0 +1,5 @@
+# DSO-703 Trivy fixture — VULNERABLE image, pinned by digest.
+# python:3.11.0-slim — carries FIXED critical CVEs (e.g. CVE-2024-45491, libexpat1),
+# so Trivy flags them even with --ignore-unfixed (the app gate's policy).
+# Expected: Trivy --severity CRITICAL,HIGH --ignore-unfixed --exit-code 1 => exit 1.
+python@sha256:b5ee5360b357dcd0ab2e1cc5e22fa589b6734bbd55776df6b1700994febf1527

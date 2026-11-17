@@ -1,0 +1,10 @@
+{
+  "name": "sca-clean-fixture",
+  "version": "1.0.0",
+  "private": true,
+  "description": "DSO-703 security fixture: a pinned clean dependency control for the npm-audit (SCA) gate. NOT part of the PostureSec application or any deploy path.",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "ms": "2.1.3"
+  }
+}

@@ -1,0 +1,4 @@
+# DSO-703 Trivy fixture — CLEAN control image, pinned by digest.
+# gcr.io/distroless/static-debian12 — minimal, no CRITICAL/HIGH under the pinned DB.
+# Expected: Trivy --severity CRITICAL,HIGH --ignore-unfixed --exit-code 1 => exit 0.
+gcr.io/distroless/static-debian12@sha256:d75cdd72874d4790092fcb1b058493ecf6bb5bf2b2b897045b00ff01d91843f2
