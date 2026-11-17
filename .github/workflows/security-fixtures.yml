@@ -196,6 +196,40 @@ jobs:
           name: checkov-compliant-report
           path: checkov-compliant.txt
 
+  # ---------- Secret scanning (gitleaks) ----------
+  secret-scan-detects:
+    name: "Secrets: planted secret MUST be detected"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Plant a fake secret at runtime (never committed) and expect detection
+        run: |
+          mkdir -p planted
+          RAND=$(head -c 60 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 36)
+          printf 'github_pat = "ghp_%s"\n' "$RAND" > planted/leak.env
+          set +e
+          docker run --rm -v "$PWD/planted:/scan" ghcr.io/gitleaks/gitleaks:v8.30.1 \
+            detect --source /scan --no-git --redact --exit-code 1 --no-banner
+          code=$?
+          set -e
+          [ "$code" -ne 0 ] || { echo "::error::gitleaks did NOT detect the planted secret"; exit 1; }
+          echo "PASS: gitleaks detected the planted secret"
+
+  secret-scan-clean:
+    name: "Secrets: clean config MUST pass"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clean file must pass gitleaks
+        run: |
+          mkdir -p clean
+          printf 'db_host = "posturesec-db"\nlog_level = "info"\n' > clean/config.env
+          set +e
+          docker run --rm -v "$PWD/clean:/scan" ghcr.io/gitleaks/gitleaks:v8.30.1 \
+            detect --source /scan --no-git --exit-code 1 --no-banner
+          code=$?
+          set -e
+          [ "$code" -eq 0 ] || { echo "::error::gitleaks flagged the clean file (exit $code)"; exit 1; }
+          echo "PASS: clean file passed"
+
   # ---------- Deploy-bot gating (structural) ----------
   deploy-gating-structure:
     name: "Deploy bot is gated behind the scanners"

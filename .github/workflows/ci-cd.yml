@@ -191,14 +191,36 @@ jobs:
           name: trivy-report-${{ matrix.component }}
           path: trivy-${{ matrix.component }}.txt
 
+  # ---------- GATE: Secret scan (gitleaks, independent) ----------
+  secret-scan:
+    name: "Secret Scan"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history for gitleaks detect
+      - name: Gitleaks (detect secrets across history)
+        run: |
+          set +e
+          docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.30.1 \
+            detect --source /repo --config /repo/.gitleaks.toml --redact \
+            --report-format sarif --report-path /repo/gitleaks.sarif --exit-code 1 --no-banner
+          exit $?
+      - name: Upload gitleaks report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitleaks-report
+          path: gitleaks.sarif
+
   # ---------- Aggregator: the single "all mandatory gates passed" signal ----------
   security-gates:
     name: "Security gates passed"
     runs-on: ubuntu-latest
-    needs: [lint, dockerfile-lint, sca, iac-scan, image-scan]
+    needs: [lint, dockerfile-lint, sca, iac-scan, image-scan, secret-scan]
     steps:
       - name: All mandatory gates succeeded
-        run: echo "lint, dockerfile-lint, sca, iac-scan and image-scan all passed."
+        run: echo "lint, dockerfile-lint, sca, iac-scan, image-scan and secret-scan all passed."
 
   # ---------- Publish to GHCR — only after every gate passes ----------
   build-push:

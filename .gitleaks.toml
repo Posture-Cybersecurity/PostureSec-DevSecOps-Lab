@@ -1,0 +1,17 @@
+# PostureSec — secret-scanning config (DSO-705)
+# Extends the gitleaks default ruleset and documents a narrow, justified allowlist.
+title = "PostureSec gitleaks config"
+
+[extend]
+useDefault = true # keep the full built-in provider ruleset (GitHub, AWS, etc.)
+
+[allowlist]
+description = "DSO-705 documented false-positives — NOT secret suppression"
+paths = [
+  # Example/template files are committed on purpose and hold placeholders only.
+  '''.*\.example$''',
+  # These files contain secret-DETECTION regexes (e.g. ghp_[A-Za-z0-9]{20,}), not
+  # secrets: a Jest assertion that no secret is present, and a guide's grep check.
+  '''backend/tests/warroom_inc003\.test\.js''',
+  '''docs/warroom/AWS-TERRAFORM-DEPLOYMENT-GUIDE\.md''',
+]
