@@ -10,7 +10,10 @@ Pinned, vendored Argo CD install for the PostureSec GitOps pipeline.
 ```bash
 minikube start --driver=docker
 kubectl apply -f argocd/namespace.yaml
-kubectl apply -n argocd -f argocd/install.yaml
+# --server-side is REQUIRED: argocd-cm exceeds the 262144-byte client-side
+# annotation limit, so a plain client-side apply fails with
+# "metadata.annotations: Too long".
+kubectl apply --server-side -n argocd -f argocd/install.yaml
 kubectl -n argocd rollout status deploy/argocd-server --timeout=300s
 ```
 

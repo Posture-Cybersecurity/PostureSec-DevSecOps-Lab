@@ -23,7 +23,10 @@ apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
   name: posturesec-ebs-sc
-provisioner: ebs.csi.eks.amazonaws.com
+# The EKS managed addon `aws-ebs-csi-driver` registers itself as ebs.csi.aws.com.
+# (ebs.csi.eks.amazonaws.com is the EKS Auto Mode driver name, which this cluster
+# does not run — pointing here at that name leaves every PVC forever Pending.)
+provisioner: ebs.csi.aws.com
 parameters:
   type: gp3
   encrypted: "true"
