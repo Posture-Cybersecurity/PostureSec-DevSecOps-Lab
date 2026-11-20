@@ -1,0 +1,68 @@
+services:
+  # ---- PostgreSQL Database ----
+  db:
+    image: postgres:16-alpine
+    container_name: posturesec-db1
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: posturesec_user
+      POSTGRES_PASSWORD: posturesec_pass_2026
+      POSTGRES_DB: posturesec_db
+    ports:
+      - "55900:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U posturesec_user -d posturesec_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    # Security: read-only root filesystem where possible
+    tmpfs:
+      - /tmp
+      - /run
+
+  # ---- Backend API ----
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: posturesec-backend
+    restart: unless-stopped
+    environment:
+      PORT: "5000"
+      DB_USER: posturesec_user
+      DB_PASSWORD: posturesec_pass_2026
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: posturesec_db
+    expose:
+      - "5000"
+    depends_on:
+      db:
+        condition: service_healthy
+    # Security: do not run as root (already in Dockerfile, but enforced here too)
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+
+  # ---- Frontend (Nginx + React) ----
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: posturesec-frontend
+    restart: unless-stopped
+    ports:
+      - "80:8080"
+    depends_on:
+      - backend
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  pgdata:
+    driver: local

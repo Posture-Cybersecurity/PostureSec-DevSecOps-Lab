@@ -1,0 +1,353 @@
+# ==============================================================
+# PostureSec - DevSecOps CI/CD Pipeline
+# ==============================================================
+# DECOUPLED, ENFORCING pipeline.
+# The five security/quality gates run INDEPENDENTLY (one failing gate no longer
+# hides the others), each uploads a readable report even on failure, and the
+# image is BUILT ONCE (shared via the buildx GHA cache) so Trivy scans the same
+# content that is later published.
+#
+#   lint ─┐
+#   dockerfile-lint ─┤
+#   sca ─┼─► security-gates ─► build-push (push only) ─► update-manifest (deploy bot)
+#   iac-scan ─┤
+#   build-image ─► image-scan (Trivy) ─┘
+#
+# Publishing to GHCR and the deploy bot run ONLY after every mandatory gate
+# passes, so a vulnerable image is never pushed and never deployed.
+# ==============================================================
+
+name: PostureSec DevSecOps Pipeline
+
+on:
+  push:
+    branches: ["**"] # ** matches slashes; "*" alone skips feature/* branches
+  pull_request:
+    branches: ["**"]
+
+# Security: restrict default permissions to read-only
+permissions:
+  contents: read
+
+env:
+  DOCKER_REGISTRY: ghcr.io
+  TRIVY_IMAGE: aquasec/trivy:0.76.2 # pinned (replaces trivy-action@master)
+
+jobs:
+  # ---------- GATE: Lint (independent) ----------
+  lint:
+    name: "Lint Code"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        component: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: "${{ matrix.component }}/package-lock.json"
+      - name: Install dependencies
+        working-directory: ${{ matrix.component }}
+        run: npm ci
+      - name: Run ESLint
+        working-directory: ${{ matrix.component }}
+        run: npm run lint
+
+  # ---------- GATE: Dockerfile lint (independent) ----------
+  dockerfile-lint:
+    name: "Dockerfile Lint"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        component: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Hadolint
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: ${{ matrix.component }}/Dockerfile
+          failure-threshold: warning
+
+  # ---------- GATE: SCA (independent; blocks on high/critical) ----------
+  sca:
+    name: "Dependency Audit"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        component: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: "${{ matrix.component }}/package-lock.json"
+      - name: Install dependencies
+        working-directory: ${{ matrix.component }}
+        run: npm ci
+      - name: npm audit (gate + report)
+        working-directory: ${{ matrix.component }}
+        run: |
+          set -o pipefail
+          npm audit --audit-level=high 2>&1 | tee ../npm-audit-${{ matrix.component }}.txt
+      - name: Upload SCA report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sca-report-${{ matrix.component }}
+          path: npm-audit-${{ matrix.component }}.txt
+
+  # ---------- GATE: IaC scan (independent) ----------
+  iac-scan:
+    name: "IaC Security Scan"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Checkov on Terraform (gate)
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: terraform/
+          framework: terraform
+          soft_fail: false
+          skip_check: CKV_AWS_39,CKV_AWS_58 # Public EKS endpoint (intentional for dev)
+          output_format: cli
+          output_file_path: console,checkov-terraform.txt
+      # Documented, scoped exception: the K8s manifests include intentional lab
+      # choices (e.g. NodePort) that trip generic checks. Kept soft until a
+      # per-check triage; findings are still printed. Not a blanket bypass.
+      - name: Run Checkov on Kubernetes manifests (report-only)
+        if: always()
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: k8s/
+          framework: kubernetes
+          soft_fail: true
+          output_format: cli
+      - name: Upload IaC report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: iac-report
+          path: checkov-terraform.txt
+
+  # ---------- Build the image ONCE (populates the shared cache; no push) ----------
+  build-image:
+    name: "Build image (${{ matrix.component }})"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        component: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build (cache only, no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./${{ matrix.component }}
+          file: ./${{ matrix.component }}/Dockerfile
+          outputs: type=cacheonly
+          cache-from: type=gha,scope=${{ matrix.component }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.component }}
+
+  # ---------- GATE: Image scan (Trivy) — scans the cached build, independent of SCA ----------
+  image-scan:
+    name: "Scan image (${{ matrix.component }})"
+    runs-on: ubuntu-latest
+    needs: build-image
+    strategy:
+      fail-fast: false
+      matrix:
+        component: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Load the cached image locally
+        uses: docker/build-push-action@v6
+        with:
+          context: ./${{ matrix.component }}
+          file: ./${{ matrix.component }}/Dockerfile
+          load: true
+          tags: posturesec-${{ matrix.component }}:scan
+          cache-from: type=gha,scope=${{ matrix.component }}
+      - name: "Trivy scan (gate: CRITICAL/HIGH, fixed only)"
+        run: |
+          set +e
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+            "$TRIVY_IMAGE" image \
+            --severity CRITICAL,HIGH --ignore-unfixed --exit-code 1 \
+            --format table "posturesec-${{ matrix.component }}:scan" | tee trivy-${{ matrix.component }}.txt
+          code=${PIPESTATUS[0]}
+          exit "$code"
+      - name: Upload Trivy report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-report-${{ matrix.component }}
+          path: trivy-${{ matrix.component }}.txt
+
+  # ---------- GATE: Secret scan (gitleaks, independent) ----------
+  secret-scan:
+    name: "Secret Scan"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history for gitleaks detect
+      - name: Gitleaks (detect secrets across history)
+        run: |
+          set +e
+          docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.30.1 \
+            detect --source /repo --config /repo/.gitleaks.toml --redact \
+            --report-format sarif --report-path /repo/gitleaks.sarif --exit-code 1 --no-banner
+          exit $?
+      - name: Upload gitleaks report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitleaks-report
+          path: gitleaks.sarif
+
+  # ---------- Aggregator: the single "all mandatory gates passed" signal ----------
+  security-gates:
+    name: "Security gates passed"
+    runs-on: ubuntu-latest
+    needs: [lint, dockerfile-lint, sca, iac-scan, image-scan, secret-scan]
+    steps:
+      - name: All mandatory gates succeeded
+        run: echo "lint, dockerfile-lint, sca, iac-scan, image-scan and secret-scan all passed."
+
+  # ---------- Publish to GHCR — only after every gate passes ----------
+  build-push:
+    name: "Build & Push (${{ matrix.component }})"
+    runs-on: ubuntu-latest
+    needs: security-gates
+    if: github.event_name == 'push'
+    permissions:
+      contents: read
+      packages: write # Needed to push to GHCR
+    strategy:
+      fail-fast: false
+      matrix:
+        component: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set GHCR image paths
+        run: |
+          REPO=$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')
+          echo "GHCR_REPO=ghcr.io/${REPO}" >> $GITHUB_ENV
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Extract metadata (tags, labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.GHCR_REPO }}/posturesec-${{ matrix.component }}
+          tags: |
+            type=sha,prefix=
+            type=ref,event=branch
+            type=raw,value=latest,enable={{is_default_branch}}
+      - name: Build and push image (from the scanned cache)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./${{ matrix.component }}
+          file: ./${{ matrix.component }}/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.component }}
+          # Security: provenance and SBOM
+          provenance: true
+          sbom: true
+
+  # ---------- Deploy bot — only runs after a gated publish (hardened in DSO-704) ----------
+  update-manifest:
+    name: "Update K8s Manifest"
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    needs: build-push
+    if: github.event_name == 'push'
+    permissions:
+      contents: write # Needed to push manifest changes
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Get short SHA
+        id: sha
+        run: echo "short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+      - name: Set GHCR image paths
+        run: |
+          REPO=$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')
+          echo "BACKEND_IMAGE=ghcr.io/${REPO}/posturesec-backend" >> $GITHUB_ENV
+          echo "FRONTEND_IMAGE=ghcr.io/${REPO}/posturesec-frontend" >> $GITHUB_ENV
+      - name: Update K8s manifest with new image tags
+        run: |
+          IMAGE_TAG=${{ steps.sha.outputs.short }}
+          BACKEND_LINE=$(awk '/- name: backend/{found=1} found && /image:/{print NR; exit}' k8s/posturesec.yaml)
+          sed -i "${BACKEND_LINE}s|.*|          image: ${BACKEND_IMAGE}:${IMAGE_TAG}|" k8s/posturesec.yaml
+          FRONTEND_LINE=$(awk '/- name: frontend/{found=1} found && /image:/{print NR; exit}' k8s/posturesec.yaml)
+          sed -i "${FRONTEND_LINE}s|.*|          image: ${FRONTEND_IMAGE}:${IMAGE_TAG}|" k8s/posturesec.yaml
+          echo "Updated images to tag: ${IMAGE_TAG}"
+          grep -n "image:" k8s/posturesec.yaml
+      - name: Commit and push manifest update
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add k8s/posturesec.yaml
+          git diff --cached --quiet || git commit -m "ci: update k8s images to ${{ steps.sha.outputs.short }} [skip ci]"
+          git push
+      - name: Report the GitOps hand-off (DSO-704)
+        run: |
+          {
+            echo "## 🤖 CI bot — GitOps hand-off"
+            echo "Bumped backend/frontend images to \`${{ steps.sha.outputs.short }}\` in \`k8s/posturesec.yaml\` and pushed with \`[skip ci]\` (no recursive run)."
+            echo "Argo CD Application \`posturesec\` (tracking this branch) reconciles the new tags on its next sync — closing the loop."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ---------- CI feedback: post the gate results to the PR (DSO-704) ----------
+  pr-summary:
+    name: "PR security summary"
+    runs-on: ubuntu-latest
+    needs: [lint, dockerfile-lint, sca, iac-scan, image-scan, secret-scan]
+    if: ${{ always() && github.event_name == 'pull_request' }}
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Post / update the gate summary comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const needs = ${{ toJSON(needs) }};
+            const icon = r => r === 'success' ? '✅' : (r === 'skipped' ? '⏭️' : '❌');
+            const rows = Object.entries(needs)
+              .map(([k, v]) => `| \`${k}\` | ${icon(v.result)} ${v.result} |`).join('\n');
+            const body = [
+              '<!-- posturesec-security-gates -->',
+              '### 🛡️ PostureSec security gates',
+              '',
+              '| Gate | Result |',
+              '|---|---|',
+              rows,
+              '',
+              '_A failing gate blocks publish and deploy. Reports are in the run artifacts._',
+            ].join('\n');
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const { data: comments } = await github.rest.issues.listComments({ owner, repo, issue_number });
+            const existing = comments.find(c => c.body && c.body.includes('posturesec-security-gates'));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }

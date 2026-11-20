@@ -1,0 +1,10 @@
+{
+  "name": "sca-vulnerable-fixture",
+  "version": "1.0.0",
+  "private": true,
+  "description": "DSO-703 security fixture: a deliberately vulnerable dependency for the npm-audit (SCA) gate. NOT part of the PostureSec application or any deploy path.",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "lodash": "4.17.4"
+  }
+}

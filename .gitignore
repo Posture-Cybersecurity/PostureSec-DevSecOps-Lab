@@ -1,0 +1,22 @@
+node_modules/
+dist/
+.env
+*.log
+
+# Terraform
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.backup
+terraform/.terraform.lock.hcl
+terraform/crash.log
+
+# Docker
+*.tar
+k8s/dockerhub-secret.yaml
+k8s/ghcr-secret.yaml
+k8s/posturesec-db-secret.yaml
+argocd/repo-secret.yaml
+
+# OS
+.DS_Store
+Thumbs.db
