@@ -58,9 +58,13 @@ HIGH/CRITICAL deps (axios SSRF), Terraform misconfigs, and image CVEs. *Red = wo
 **It immediately found a real one:**
 ```yaml
 # k8s/posturesec.yaml  (committed!)
-POSTGRES_PASSWORD: cG9zdHVyZXNlY19wYXNzXzIwMjY=   # base64 ≠ encryption
+POSTGRES_PASSWORD: <REDACTED — a base64 value was committed here; base64 ≠ encryption>
 ```
 → removed from the manifest, created out-of-band, password flagged for rotation.
+> The actual base64 string was itself scrubbed from this slide deck: embedding a real
+> (even historical) credential in teaching material keeps it in Git history and trips
+> the very scanner this slide is about. See the DSO-705 rotation runbook for the
+> redacted-before/after.
 
 ---
 
